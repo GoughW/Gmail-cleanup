@@ -7,7 +7,7 @@ from email.utils import parsedate_to_datetime
 from hashlib import sha256
 from html import escape, unescape
 import json
-from urllib.parse import urlsplit, unquote
+from urllib.parse import urlsplit, unquote, parse_qs
 
 from .errors import CleanupError, Unsupported
 
@@ -272,19 +272,34 @@ def _validate_layout(msg):
             raise Unsupported("Mixed MIME contains an unclassified resource")
 
 
-def validate_url(value):
-    if not isinstance(value, str) or any(ord(c) < 32 for c in value):
+def drive_file_id(value):
+    """Validate supported Drive viewer URLs without discarding canonical query data."""
+    if not isinstance(value, str) or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value):
         raise CleanupError("Invalid retained Drive URL")
     try:
         parsed = urlsplit(value)
         valid = (parsed.scheme == "https" and parsed.hostname == "drive.google.com"
-                 and not parsed.username and not parsed.password and not parsed.port
-                 and parsed.path.startswith("/file/d/")
-                 and parsed.path.removeprefix("/file/d/").split("/")[0])
+                 and not parsed.username and not parsed.password and parsed.port is None
+                 and not parsed.fragment)
+        file_id = ""
+        if parsed.path.startswith("/file/d/"):
+            file_id, _, suffix = parsed.path.removeprefix("/file/d/").partition("/")
+            valid &= suffix.rstrip("/") in {"", "view", "preview"}
+        elif parsed.path == "/open":
+            ids = parse_qs(parsed.query, keep_blank_values=True).get("id", [])
+            file_id = ids[0] if len(ids) == 1 else ""
+        else:
+            valid = False
+        valid &= bool(file_id) and all(c.isascii() and (c.isalnum() or c in "_-") for c in file_id)
     except ValueError:
         valid = False
     if not valid:
-        raise CleanupError("Use an https://drive.google.com/file/d/ retained-file URL")
+        raise CleanupError("Use a valid HTTPS Drive file viewer URL")
+    return file_id
+
+
+def validate_url(value):
+    drive_file_id(value)
 
 
 def removable_attachment(part, message):

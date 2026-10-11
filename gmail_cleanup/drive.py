@@ -6,11 +6,11 @@ import re
 
 from .api import DRIVE_SCOPE, DRIVE_READ_SCOPE
 from .errors import CleanupError
-from .mime import digest
+from .mime import digest, drive_file_id
 
 FOLDER_TYPE = "application/vnd.google-apps.folder"
 PURPOSE = "gmail-cleanup-backups-v1"
-FIELDS = "id,name,mimeType,trashed,parents,size,sha256Checksum,md5Checksum,sha1Checksum,version,appProperties,createdTime,modifiedTime,viewedByMeTime"
+FIELDS = "id,name,mimeType,trashed,parents,size,sha256Checksum,md5Checksum,sha1Checksum,version,appProperties,createdTime,modifiedTime,viewedByMeTime,webViewLink"
 FILE_ID = re.compile(r"[A-Za-z0-9_-]+\Z")
 
 
@@ -27,9 +27,7 @@ def valid_id(value):
 
 
 def file_id_from_url(url):
-    from .mime import validate_url
-    validate_url(url)
-    return valid_id(url.split("/file/d/", 1)[1].split("/", 1)[0].split("?", 1)[0])
+    return valid_id(drive_file_id(url))
 
 
 class Drive:
@@ -192,7 +190,7 @@ def verify_file(drive, file_id, source_hash, source_size=None, folder_id=None,
         expected_size = int(before["size"]) if source_size is None else source_size
     except (KeyError, ValueError, TypeError):
         expected_size = None
-    observation = {"file_id": file_id, "drive_url": f"https://drive.google.com/file/d/{file_id}/view",
+    observation = {"file_id": file_id, "drive_url": None,
                    "source_sha256": source_hash, "downloaded_sha256": None,
                    "name": intended_name, "parents": intended_parents,
                    "expected_size_bytes": expected_size, "version": before.get("version"),
@@ -236,6 +234,16 @@ def verify_file(drive, file_id, source_hash, source_size=None, folder_id=None,
     if errors or not all(observation["checks"].values()):
         observation["integrity_errors"] = {"after": errors}
         raise BackupVerificationError("Downloaded Drive file failed identity/destination/size/SHA-256 verification", observation)
+    # Use the latest verified metadata; webViewLink may settle after upload too.
+    # Never reconstruct a link and drop Drive's resource key or other query data.
+    latest = observation.get("metadata_after_recheck", after)
+    link = latest.get("webViewLink")
+    try:
+        if file_id_from_url(link) != file_id:
+            raise CleanupError("Drive viewer URL identifies a different file")
+    except CleanupError:
+        raise BackupVerificationError("Drive returned no valid canonical webViewLink for the retained file", observation) from None
+    observation.update(drive_url=link, web_view_link=link, link_source="Drive files.webViewLink")
     observation["verified"] = True
     return observation
 

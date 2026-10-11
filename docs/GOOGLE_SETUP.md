@@ -118,6 +118,12 @@ reference browsing, not runtime API requirements. Python installation needs
 presets in a development environment. No wildcard is required for the API hosts.
 Keep the inherited proxy and trusted CA bundle; never disable TLS verification.
 
+Retained-copy links use Drive's canonical `webViewLink`. Opening them requires
+browser access to `drive.google.com` and a session signed into an owning/authorized
+account. That browser host is separate from the three cloud API runtime hosts.
+The tool does not change file sharing permissions or fetch authenticated browser
+pages; an OAuth API-access check is not a browser-session check.
+
 Review/save the environment settings, then use the product's **Publish** action.
 Draft saving does not publish the environment. The available agent tools save
 installation/startup instructions and host configuration; publication is a product

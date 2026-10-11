@@ -8,7 +8,7 @@ preservation is not assumed.
 
 ## Offline validation
 
-The final full suite passed: **168 tests, none failed or skipped**, using
+The final full suite passed: **177 tests, none failed or skipped**, using
 `.venv/bin/python -m unittest discover`. Tests cover text/HTML, received/sent-style
 fixtures, reply threads, selective attachment removal, inline images, Unicode and
 duplicate filenames, 4 MiB attachments, Drive integrity, metadata settling,
@@ -42,6 +42,31 @@ The user additionally inspected Gmail UI and confirmed correct sender, recipient
 subject, timestamp and thread placement, plus the intended note/link/hash rendering.
 This is user-reported UI evidence; the agent's independent checks used the API.
 
+### Retained-link investigation and improvement
+
+The reported link-loading issue was resolved by the user, who confirmed the
+existing link works. Read-only inspection of all five stored replacement HTML
+notes found valid anchors: no semicolon/hash punctuation inside href, and the
+semicolon immediately after the closing anchor. The previous generated URL and
+Drive's canonical webViewLink identified the same file; for this binary backup,
+the canonical URL additionally includes `?usp=drivesdk`. This difference was not
+established as a cause of loading failure. No existing replacement needs regeneration.
+
+Automatic retention now requests `webViewLink` in Drive metadata and stores its
+exact value from the latest verified snapshot in the proof, resolved selections
+and note. Query/resource-key data is preserved; missing/unsafe/wrong-file links
+block resolution. Legacy approved/manual URLs stay immutable for recovery.
+Nine new tests cover canonical propagation through MIME/HTML, exact parsed href,
+escaping, query-style viewer URLs, bad/missing links, settling metadata and legacy
+plan recovery. Existing HTML escaping was already correct and was not weakened.
+
+A further read-only API check of the existing disposable backup confirmed private
+owner access and the retained content hash, and local reconstruction produced the
+exact canonical href with punctuation outside the anchor. No sharing permissions,
+Drive files or Gmail messages were changed. Browser success is user-confirmed;
+the agent did not operate an authenticated browser. Detailed evidence remains in
+private `drive-link-investigation.json` and `canonical-link-verification.json`.
+
 Per-message IDs, filenames, links, hashes, Date/threading-header values, metadata
 snapshots, all header differences and durable events remain in ignored private live
 audit files. No actual mailbox or Drive IDs, links, credential values or raw email
@@ -64,8 +89,8 @@ Gmail comparison tolerates only the explicitly listed root transport/authenticat
 headers and Received. The exact approved reconstruction is validated first;
 correspondence/threading headers, nested MIME headers and contents stay strict.
 Every header difference is audited with value hashes and sequence/casing data.
-The readable plain/HTML note includes each removed filename, verified retained
-Drive URL and matching SHA-256; it does not change Drive sharing permissions.
+The readable plain/HTML note includes each removed filename, canonical Drive API
+webViewLink and matching SHA-256; it does not change Drive sharing permissions.
 
 Retry behavior, durable state and read-only recovery are documented in README.md.
 Installation/startup instructions and the minimal explicit API-host list are saved

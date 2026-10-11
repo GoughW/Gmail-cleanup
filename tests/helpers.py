@@ -23,7 +23,8 @@ class FakeDrive:
         metadata = {"id": file_id, "name": name, "mimeType": FOLDER_TYPE if payload is None else "application/octet-stream",
                     "trashed": False, "version": "1", "appProperties": {"purpose": PURPOSE}}
         if payload is not None:
-            metadata.update(size=str(len(payload)), parents=[folder_id], sha256Checksum=digest(payload))
+            metadata.update(size=str(len(payload)), parents=[folder_id], sha256Checksum=digest(payload),
+                            webViewLink=f"https://drive.google.com/file/d/{file_id}/view")
             metadata["appProperties"]["source_sha256"] = digest(payload)
             self.payloads[file_id] = payload
         self.files[file_id] = metadata

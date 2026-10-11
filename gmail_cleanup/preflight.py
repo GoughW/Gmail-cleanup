@@ -34,8 +34,9 @@ def run(api, store, manifest, drive=None, drive_error=None, folder_id=None, allo
             indexed = dict(parts(parsed))
             selections = [{"part": c["part"], "decoded_sha256": c["decoded_sha256"],
                            "retained_sha256": c["decoded_sha256"],
-                           "drive_url": (f'https://drive.google.com/file/d/{c["drive_file_id"]}/view'
-                                         if c.get("drive_file_id") else UNRESOLVED_URL)} for c in choices]
+                           # Local MIME validation placeholder only. The final
+                           # selections always use verified Drive webViewLink.
+                           "drive_url": UNRESOLVED_URL} for c in choices]
             existing = store.get(message_id)
             if existing and (existing["state"] != "planned" or existing.get("replacement_id")):
                 raise CleanupError("Existing operation is pending/completed; inspect status or reconcile before previewing a new creation")

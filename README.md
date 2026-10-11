@@ -124,6 +124,13 @@ Drive download verification before creation and Trash. The exact plan contains
 selected parts, decoded hashes, retained URLs, original/replacement inventories,
 header edits, labels, thread, timestamps, size deltas and a plan SHA-256.
 
+Automatic backups store Drive's canonical `files.webViewLink` verbatim in the
+verified proof, resolved manifest and planned note. Query parameters such as
+`usp` or `resourcekey` are preserved. A missing, unsafe or wrong-file canonical
+link blocks automatic resolution; the tool does not invent a replacement URL.
+Existing approved/manual URLs remain unchanged for immutable-plan recovery, while
+fresh proofs separately record the current canonical link for the same file.
+
 ## Create, verify, then separately approve Trash
 
 ```sh
@@ -177,7 +184,7 @@ and HTML body. Text uses this format once per removed attachment:
 ```text
 [Attachment cleanup: retained copies; SHA-256 recorded below]
 Removed attachment: <original filename>
-Retained copy: https://drive.google.com/file/d/<verified file ID>/view
+Retained copy: <Drive API canonical webViewLink>
 SHA-256: <verified decoded source/Drive SHA-256>
 ```
 
@@ -186,6 +193,12 @@ URL and the same hash. The link identifies the verified retained file; creating 
 note does not change sharing permissions. Bodies normalize to UTF-8/base64, with
 changes audited. Tiny attachments may cost less space than the note; actual size
 deltas are reported. Removing invalid transport signatures can also reduce size.
+
+HTML attribute escaping converts query `&` to `&amp;` once; a parsed anchor's `href`
+is exactly the canonical URL. The semicolon before `SHA-256` is after `</a>` and
+outside the quoted `href`. Browser access needs the owning/authorized Google
+account's session; successful API download does not establish which account is
+active in your browser. Never make a backup public to resolve a sign-in problem.
 
 Reconstruction removes root DKIM-Signature, DomainKey-Signature,
 X-Google-DKIM-Signature, ARC-Seal, ARC-Message-Signature,

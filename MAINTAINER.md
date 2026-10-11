@@ -44,6 +44,7 @@ flowchart LR
 | [gmail_cleanup/api.py](gmail_cleanup/api.py) | OAuth refresh, raw Gmail fetch, insert, thread read, exact-message Trash; no automatic write retries. |
 | [gmail_cleanup/mime.py](gmail_cleanup/mime.py) | MIME validation/transformation, hashes, notes, transport allowlists and header auditing. |
 | [gmail_cleanup/drive.py](gmail_cleanup/drive.py) | Backup lookup/deduplication, persisted upload IDs, metadata and downloaded-byte verification. |
+| [tests/test_drive_links.py](tests/test_drive_links.py) | Canonical webViewLink propagation, exact HTML href/escaping and immutable legacy-link recovery. |
 | [gmail_cleanup/preflight.py](gmail_cleanup/preflight.py) | Validate source, retain attachments, reconstruct locally, emit resolved selections/plans; no Gmail writes. |
 | [gmail_cleanup/engine.py](gmail_cleanup/engine.py) | Immutable plan checks, create/verify/reconcile/Trash lifecycle and post-Trash recovery. |
 | [gmail_cleanup/storage.py](gmail_cleanup/storage.py) | Private file writes, SQLite operations/backups and durable event history. |
@@ -109,7 +110,7 @@ settings changes. Runtime clients/connections must be initialized in each new ta
    file ID, pinned name/parent destination, expected size and binary/non-trashed state.
 4. **Reconstruction and plan:** remove only selected attachment leaves; preserve
    unselected resources and original decoded correspondence; append a readable note
-   with filename, verified Drive URL and matching SHA-256. Persist exact expected
+   with filename, Drive's verified canonical `webViewLink` and matching SHA-256. Persist exact expected
    inventories, headers, hashes, metadata and plan digest.
 5. **Insertion:** recheck source and Drive, regenerate approved bytes and persist
    `insert_pending` before `users.messages.insert`, using the original thread/labels
@@ -184,6 +185,17 @@ destination/identity/size mismatches, missing/trashed/native files and wrong has
 block. Drive-provided checksums and app tags never replace independent content
 hashing. The tool never changes existing Drive file content, location or sharing.
 
+New automatic selections copy `files.webViewLink` verbatim from the latest verified
+Drive metadata, including query/resource-key parameters. Missing, unsafe or
+wrong-file viewer URLs block resolution rather than causing a guessed URL fallback.
+Supported HTTPS Drive viewer forms include `/file/d/ID/view` and `/open?id=ID`.
+The exact URL is persisted in backup proof, manifest and note. HTML escapes query
+ampersands once; parsed `href` must equal the canonical URL and end before the
+semicolon preceding `SHA-256`. Existing approved/manual URLs are not silently
+rewritten during recovery; current canonical links are separately audited.
+Browser access needs the owning/authorized Google account. Never make the file
+public to fix a wrong-session or sign-in problem. See [link regressions](tests/test_drive_links.py).
+
 ### Intentional header differences
 
 Changing MIME/body bytes invalidates delivery signatures. Reconstruction removes
@@ -211,7 +223,7 @@ The full offline suite needs no OAuth/network access:
 .venv/bin/python -m unittest discover -v
 ```
 
-The latest full result is 168 passing tests. To simulate the entire five-message
+The latest full result is 177 passing tests. To simulate the entire five-message
 backup → insert → verify → Trash flow using in-memory fake services only:
 
 ```sh
@@ -291,6 +303,7 @@ or manual verification-state edits are acceptable.
 | `trash_pending` / `trashed` / `trashed_verify_failed` | Reinvoke approval-gated `trash` for read-only recovery: inspect exact original TRASH label/bytes/thread/date, replacement and Drive. Never issue a second blind mutation. A confirmed post-Trash failure cannot undo the prior write; stop and report it. [test_trash_workflow.py](tests/test_trash_workflow.py). |
 | Wrong hash/name/parent/size or missing/native Drive file | Do not insert/Trash. Inspect pinned counterpart and complete downloaded-byte proof. Metadata version changes alone are benign. [test_drive_integrity.py](tests/test_drive_integrity.py). |
 | Multiple matching backups/folders | Provide intended `drive_file_id`/`--drive-folder-id`; do not arbitrarily choose or create duplicates. |
+| Note link does not open | Compare the actual HTML href with `files.webViewLink`, including query parameters. Check account/session access; SHA punctuation belongs outside the anchor. An API download does not establish browser session identity. Inspect `test_drive_links.py`; do not make backups public or regenerate messages blindly. |
 | Unsupported MIME or nonzero ordering delta | Skip this message and explain why; do not force success by editing headers or weakening gates. [test_mime.py](tests/test_mime.py). |
 | OAuth/403/network/TLS failure | Check effective grants, Desktop client/token pairing, API enablement, intended account, exact active hosts and trusted CA/proxy. Renew consent when needed. Never expose request bodies or secrets. [GOOGLE_SETUP troubleshooting](docs/GOOGLE_SETUP.md#read-only-readiness-checks-before-a-pilot), [test_api_cli.py](tests/test_api_cli.py). |
 | SQLite state conflict/private-file error | Stop concurrent operators; inspect permissions and saved state. Do not delete/reset the audit or force-follow a symlink. `storage.py`. |
