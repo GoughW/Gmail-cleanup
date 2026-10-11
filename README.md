@@ -1,5 +1,8 @@
 # Gmail attachment cleanup
 
+**Taking over this repository? Start with [MAINTAINER.md](MAINTAINER.md)** for the
+architecture, safety gates, state recovery, simulations and pilot checklist.
+
 A small Python CLI using the Gmail and Drive APIs directly. It backs up explicitly
 selected attachments, verifies the retained bytes, inserts a reconstructed email
 without sending, and verifies preservation before moving its original to Trash.
