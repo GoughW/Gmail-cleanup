@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "allowlist": [
+    "EXPLICITGMAILID"
+  ],
+  "messages": {
+    "EXPLICITGMAILID": [
+      {
+        "part": "0.1",
+        "decoded_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b"
+      }
+    ]
+  }
+}

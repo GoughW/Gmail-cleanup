@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "allowlist": [
+    "abc123"
+  ],
+  "messages": {
+    "abc123": [
+      {
+        "part": "0.1",
+        "decoded_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+        "retained_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+        "drive_url": "https://drive.google.com/file/d/SYNTHETIC-EXAMPLE/view"
+      }
+    ]
+  }
+}
