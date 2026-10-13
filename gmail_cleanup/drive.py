@@ -177,75 +177,81 @@ def metadata_errors(item, file_id, expected_name, expected_parents, expected_siz
 
 def verify_file(drive, file_id, source_hash, source_size=None, folder_id=None,
                 expected_name=None, expected_parents=None):
+    """Two bounded complete version-bracketed downloads, never accept final churn."""
     file_id = valid_id(file_id)
-    before = drive.get(file_id)
-    if not isinstance(before, dict):
-        raise BackupVerificationError("Retained Drive file is missing or inaccessible",
-                                      {"file_id": file_id, "verified": False, "metadata_before": before})
-    intended_name = expected_name if expected_name is not None else before.get("name")
-    intended_parents = expected_parents if expected_parents is not None else before.get("parents", [])
-    if not isinstance(intended_parents, list) or not all(isinstance(p, str) and p for p in intended_parents):
-        intended_parents = []
-    try:
-        expected_size = int(before["size"]) if source_size is None else source_size
-    except (KeyError, ValueError, TypeError):
-        expected_size = None
-    observation = {"file_id": file_id, "drive_url": None,
-                   "source_sha256": source_hash, "downloaded_sha256": None,
-                   "name": intended_name, "parents": intended_parents,
-                   "expected_size_bytes": expected_size, "version": before.get("version"),
-                   "verified": False, "metadata_before": before,
-                   "method": "files.get alt=media; SHA-256 of downloaded bytes"}
-    errors = metadata_errors(before, file_id, intended_name, intended_parents, expected_size)
-    if folder_id and folder_id not in intended_parents:
-        errors.append("intended_folder")
-    if errors:
-        observation["integrity_errors"] = {"before": errors}
-        raise BackupVerificationError("Drive file identity/destination/size check failed: " + ", ".join(errors), observation)
-    actual, size = drive.download_hash(file_id)
-    after = drive.get(file_id)
-    observation.update(downloaded_sha256=actual, size_bytes=size, metadata_after=after,
-                       metadata_changes=metadata_changes(before, after))
-    errors = metadata_errors(after, file_id, intended_name, intended_parents, expected_size)
-    observation["checks"] = {"file_identity_name_destination_size_before": True,
-                             "file_identity_name_destination_size_after": not errors,
-                             "downloaded_sha256_matches_source": actual == source_hash,
-                             "downloaded_size_matches_source_and_metadata": size == expected_size}
-    observation["downloads"] = [{"sha256": actual, "size_bytes": size}]
-    if observation["metadata_changes"] and not errors and actual == source_hash and size == expected_size:
-        # Metadata settling is allowed. A bounded fresh download after the change
-        # distinguishes settling from a genuine same-size content update. No wait,
-        # mutation or requirement that counters stop changing is introduced.
-        again, again_size = drive.download_hash(file_id)
-        final = drive.get(file_id)
-        final_errors = metadata_errors(final, file_id, intended_name, intended_parents, expected_size)
-        observation.update(metadata_after_recheck=final,
-                           metadata_recheck_changes=metadata_changes(after, final))
-        observation["downloads"].append({"sha256": again, "size_bytes": again_size})
-        observation["checks"].update(
-            fresh_download_after_metadata_change_matches_source=again == source_hash and again_size == expected_size,
-            file_identity_name_destination_size_after_recheck=not final_errors)
-        errors += final_errors
-    # These checksums/counters can lag post-upload processing. Record them as advisory;
-    # the independent SHA-256 of the complete downloaded bytes is authoritative.
-    observation["advisory_checksum_matches_download"] = {
-        stage: item.get("sha256Checksum") == actual if item and item.get("sha256Checksum") else None
-        for stage, item in (("before", before), ("after", after))}
-    if errors or not all(observation["checks"].values()):
-        observation["integrity_errors"] = {"after": errors}
-        raise BackupVerificationError("Downloaded Drive file failed identity/destination/size/SHA-256 verification", observation)
-    # Use the latest verified metadata; webViewLink may settle after upload too.
-    # Never reconstruct a link and drop Drive's resource key or other query data.
-    latest = observation.get("metadata_after_recheck", after)
-    link = latest.get("webViewLink")
-    try:
-        if file_id_from_url(link) != file_id:
-            raise CleanupError("Drive viewer URL identifies a different file")
-    except CleanupError:
-        raise BackupVerificationError("Drive returned no valid canonical webViewLink for the retained file", observation) from None
-    observation.update(drive_url=link, web_view_link=link, link_source="Drive files.webViewLink")
-    observation["verified"] = True
-    return observation
+    observation = {'file_id': file_id, 'drive_url': None, 'source_sha256': source_hash,
+                   'downloaded_sha256': None, 'verified': False, 'attempts': [], 'downloads': [],
+                   'method': 'complete files.get alt=media SHA-256 bracketed by unchanged Drive version'}
+    name, parents, expected_size = expected_name, expected_parents, source_size
+    def fail(reason):
+        raise BackupVerificationError(reason, observation)
+    def version(item):
+        value = item.get('version') if isinstance(item, dict) else None
+        if not isinstance(value, str) or not re.fullmatch(r'[1-9][0-9]*', value):
+            fail('Missing/malformed Drive version; no coherent content proof')
+        return value
+    for attempt_number in (1, 2):
+        before = drive.get(file_id)
+        if not isinstance(before, dict):
+            fail('Retained Drive file is missing/inaccessible')
+        if name is None:
+            name = before.get('name')
+        if parents is None:
+            parents = before.get('parents', [])
+        if expected_size is None:
+            try:
+                expected_size = int(before['size'])
+            except (KeyError, ValueError, TypeError):
+                fail('Missing/malformed expected Drive size')
+        errors = metadata_errors(before, file_id, name, parents, expected_size)
+        if folder_id and folder_id not in parents:
+            errors.append('intended_folder')
+        observation.update(name=name, parents=parents, expected_size_bytes=expected_size,
+                           metadata_before=before, version=before.get('version'))
+        if errors:
+            observation['integrity_errors'] = {'before': errors}
+            fail('Drive identity/destination/size check failed: ' + ', '.join(errors))
+        initial_version = version(before)
+        actual, size = drive.download_hash(file_id)
+        after = drive.get(file_id)
+        observation.update(downloaded_sha256=actual, size_bytes=size, metadata_after=after,
+                           metadata_changes=metadata_changes(before, after))
+        observation['downloads'].append({'sha256': actual, 'size_bytes': size})
+        errors = metadata_errors(after, file_id, name, parents, expected_size)
+        if errors:
+            observation['integrity_errors'] = {'after': errors}
+            fail('Drive identity/destination/size changed during download')
+        final_version = version(after)
+        checks = {'file_identity_name_destination_size_before': True,
+                  'file_identity_name_destination_size_after': True,
+                  'downloaded_sha256_matches_source': actual == source_hash,
+                  'downloaded_size_matches_source_and_metadata': size == expected_size,
+                  'unchanged_version_across_complete_download': initial_version == final_version,
+                  'populated_checksums_match_download': all(not item.get('sha256Checksum') or item['sha256Checksum'] == actual
+                                                            for item in (before, after))}
+        observation['checks'] = checks
+        observation['attempts'].append({'number': attempt_number, 'metadata_before': before,
+            'metadata_after': after, 'downloaded_sha256': actual, 'size_bytes': size, 'checks': checks.copy()})
+        observation['advisory_checksum_matches_download'] = {
+            stage: item.get('sha256Checksum') == actual if item.get('sha256Checksum') else None
+            for stage,item in (('before',before),('after',after))}
+        if not checks['downloaded_sha256_matches_source'] or not checks['downloaded_size_matches_source_and_metadata']:
+            fail('Downloaded Drive bytes/size do not match approved source')
+        if not checks['populated_checksums_match_download']:
+            fail('Populated Drive SHA-256 contradicts downloaded bytes')
+        if final_version != initial_version:
+            if int(final_version) <= int(initial_version):
+                fail('Drive version regressed')
+            continue  # Discard proof. Begin another complete bracket, not a tail read.
+        link = after.get('webViewLink')
+        try:
+            if file_id_from_url(link) != file_id:
+                raise CleanupError('Wrong canonical file identity')
+        except CleanupError:
+            fail('Drive returned no valid canonical webViewLink for retained file')
+        observation.update(drive_url=link, web_view_link=link, link_source='Drive files.webViewLink', verified=True)
+        return observation
+    fail('Drive version changed during both complete attempts; verification exhausted')
 
 
 class Backups:

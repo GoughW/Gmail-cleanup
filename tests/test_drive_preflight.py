@@ -10,14 +10,15 @@ from contextlib import redirect_stdout
 
 from gmail_cleanup.api import Gmail, DRIVE_SCOPE, MODIFY_SCOPE
 from gmail_cleanup.cli import main
-from gmail_cleanup.drive import Backups, Drive, FOLDER_TYPE, verify_file, verify_selections
+from gmail_cleanup.drive import Backups, Drive, FOLDER_TYPE, verify_file, verify_selections, BackupVerificationError
 from gmail_cleanup.engine import build_plan, check_replacement, create, plan_message, trash_original
 from gmail_cleanup.errors import CleanupError, Unsupported
 from gmail_cleanup.manifest import load_backup_manifest
 from gmail_cleanup.mime import (TRANSPORT_AUTH_HEADERS, digest, parse, parts, transform,
                                transport_header_changes, header_fingerprint, without_transport_auth)
 from gmail_cleanup.preflight import run
-from gmail_cleanup.storage import Store, write_private_json
+from gmail_cleanup.storage import write_private_json
+from .helpers import Store
 from gmail_cleanup.fixtures import CASES
 from .helpers import FakeDrive, FakeGmail, message
 
@@ -75,13 +76,13 @@ class DriveTests(unittest.TestCase):
             self.backups.ensure(self.payload, "name.txt", "folder", allow_upload=True)
         self.assertEqual(self.drive.creates, [])
 
-    def test_version_counter_change_does_not_block_matching_payload(self):
+    def test_continual_version_counter_change_blocks_matching_payload(self):
         self.drive.add("existing", self.payload)
         self.drive.change_during_download = True
-        proof = verify_file(self.drive, "existing", digest(self.payload))
-        self.assertTrue(proof["verified"])
-        self.assertEqual(proof["metadata_changes"][0]["field"], "version")
-        self.assertFalse(proof["metadata_changes"][0]["blocker"])
+        with self.assertRaises(BackupVerificationError) as caught:
+            verify_file(self.drive, 'existing', digest(self.payload))
+        self.assertFalse(caught.exception.observation['verified'])
+        self.assertEqual(len(caught.exception.observation['attempts']), 2)
 
     def test_missing_trashed_native_wrong_parent_or_wrong_metadata_fail(self):
         self.drive.add("existing", self.payload)
@@ -133,6 +134,9 @@ class DriveTests(unittest.TestCase):
         self.store = Store(Path(self.temp.name) / "audit.sqlite")
         self.backups = Backups(self.drive, self.store)
         self.drive.reject_create = False
+        with self.assertRaises(CleanupError):
+            self.backups.ensure(self.payload, 'name.txt', 'folder', allow_upload=True)
+        self.backups = Backups(self.drive, self.store, recover_upload=True)
         proof = self.backups.ensure(self.payload, "name.txt", "folder", allow_upload=True)
         self.assertEqual(proof["file_id"], allocated)
         self.assertEqual(len(self.drive.allocated), 1)
@@ -366,7 +370,7 @@ class PreflightTests(unittest.TestCase):
         stdout = io.StringIO()
         with patch("gmail_cleanup.cli.Gmail.from_environment", return_value=self.api) as factory, redirect_stdout(stdout):
             code = main(["preflight", "--env-auth", "--manifest", str(path), "--output", str(output),
-                         "--state", str(self.root / "cli.sqlite"), "--upload-backups"])
+                         "--state", str(self.root / "cli.sqlite"), "--upload-backups", '--initialize-state', '--mailbox-key', 'fake-mailbox'])
         factory.assert_called_once_with(require_modify=False)
         self.assertEqual(code, 0)
         self.assertEqual(output.stat().st_mode & 0o777, 0o600)
@@ -375,18 +379,27 @@ class PreflightTests(unittest.TestCase):
 
 
 class TransportTests(unittest.TestCase):
-    def test_unreferenced_normal_attachment_cid_can_be_removed_while_inline_images_stay(self):
+    def test_unreferenced_cid_attachment_is_protected_and_retained_when_another_is_removed(self):
         original, manifest = message("inline")
         msg = parse(original["raw_bytes"])
         attachment = dict(parts(msg))[manifest["messages"]["abc123"][0]["part"]]
         attachment["Content-ID"] = "<normal-gmail-attachment>"
         raw = msg.as_bytes()
-        _, _, result = transform(raw, manifest["messages"]["abc123"], "operation")
+        with self.assertRaises(Unsupported):
+            transform(raw, manifest['messages']['abc123'], 'operation')
+        # The compatibility restriction must not damage unselected resources.
+        other = dict(parts(msg))['0.2']
+        choices = [{**manifest['messages']['abc123'][0], 'part': '0.2',
+                    'decoded_sha256': digest(other.get_payload(decode=True)),
+                    'retained_sha256': digest(other.get_payload(decode=True))}]
+        _, _, result = transform(raw, choices, 'operation')
         before_images = [(str(p["Content-ID"]), digest(p.get_payload(decode=True)))
                          for _, p in parts(msg) if p.get_content_maintype() == "image"]
         after_images = [(str(p["Content-ID"]), digest(p.get_payload(decode=True)))
                         for _, p in parts(result) if p.get_content_maintype() == "image"]
         self.assertEqual(before_images, after_images)
+        retained = next(p for _,p in parts(result) if p.get('Content-ID') == '<normal-gmail-attachment>')
+        self.assertEqual(retained.get_payload(decode=True), attachment.get_payload(decode=True))
 
     def test_referenced_attachment_cid_cannot_be_removed_even_if_disposition_says_attachment(self):
         for uri in ("cid:protected", "cid%3Aprotected", "cid&#58;protected"):

@@ -12,7 +12,7 @@ from gmail_cleanup.engine import build_plan, create, plan_message, verify_after_
 from gmail_cleanup.errors import CleanupError
 from gmail_cleanup.mime import body_text, digest, parse, parts, validate_url
 from gmail_cleanup.preflight import run
-from gmail_cleanup.storage import Store
+from .helpers import Store
 from .helpers import FakeDrive, FakeGmail, message
 
 
@@ -66,7 +66,8 @@ class DriveLinkTests(unittest.TestCase):
         self.assertEqual(proof["drive_url"], self.url)
         self.assertTrue(any(c["field"] == "webViewLink" and not c["blocker"]
                             for c in proof["metadata_changes"]))
-        self.assertEqual(len(proof["downloads"]), 2)
+        self.assertEqual(len(proof['downloads']), 1)
+        self.assertTrue(proof['checks']['unchanged_version_across_complete_download'])
 
     def test_missing_unsafe_or_wrong_file_canonical_link_blocks_resolution(self):
         for link in (None, "", "http://drive.google.com/file/d/copy/view",

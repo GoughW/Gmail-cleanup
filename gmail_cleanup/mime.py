@@ -10,6 +10,7 @@ import json
 from urllib.parse import urlsplit, unquote, parse_qs
 
 from .errors import CleanupError, Unsupported
+from .html_profile import insertion_offset, compose
 
 MARKER = "X-Gmail-Attachment-Cleanup"
 SIGNATURE_HEADERS = {"dkim-signature", "domainkey-signature", "arc-seal", "arc-message-signature",
@@ -214,7 +215,15 @@ def validate_structure(msg):
                     if not (body(child) or child.get_content_type() == "multipart/related"):
                         raise Unsupported("Unsupported alternative body choice")
         elif body(part):
+            parameters = part.get_params() or []
+            names = [name.casefold() for name, _ in parameters[1:]]
+            if len(names) != len(set(names)) or set(names) - {'charset'}:
+                raise Unsupported('Unsupported body Content-Type parameters (flowed/delsp semantics are not supported)')
+            if any(not isinstance(value, str) or not value for _, value in parameters[1:]):
+                raise Unsupported('Malformed body Content-Type parameter')
             text = body_text(part)
+            if part.get_content_type() == 'text/html':
+                insertion_offset(text)
             if any(marker in text for marker in ("-----BEGIN PGP MESSAGE-----",
                                                  "-----BEGIN PGP SIGNED MESSAGE-----")):
                 raise Unsupported("Inline PGP signed/encrypted correspondence is unsupported")
@@ -305,18 +314,7 @@ def validate_url(value):
 def removable_attachment(part, message):
     if part.is_multipart() or part.get_content_disposition() != "attachment":
         return False
-    cid = part.get("Content-ID")
-    if cid is None:
-        return True
-    # Gmail gives ordinary attachments Content-ID too. An explicitly attached
-    # leaf in a supported layout is removable only if no body references its CID.
-    value = str(cid).strip()
-    if not (value.startswith("<") and value.endswith(">") and value[1:-1]
-            and not any(c.isspace() or c in "<>" for c in value[1:-1])):
-        return False
-    target = "cid:" + value[1:-1].casefold()
-    return not any(target in unquote(unescape(body_text(p))).casefold()
-                   for _, p in parts(message) if body(p))
+    return part.get('Content-ID') is None and part.get('Content-Location') is None
 
 
 def transform(raw, selections, operation_id):
@@ -334,7 +332,7 @@ def transform(raw, selections, operation_id):
         if part is None or part.is_multipart():
             raise CleanupError("Selected MIME part does not identify a leaf")
         if not removable_attachment(part, original):
-            raise Unsupported("Only explicit non-inline attachment leaves may be removed")
+            raise Unsupported("Selected resource is protected: only attachments without inline disposition, Content-ID or Content-Location may be removed")
         filename = part.get_filename()
         if not filename or any(ord(c) < 32 for c in filename):
             raise Unsupported("Selected attachment needs a readable filename without control characters")
@@ -359,14 +357,19 @@ def transform(raw, selections, operation_id):
                          f'<a href="{escape(r["drive_url"], quote=True)}">{escape(r["drive_url"])}</a>'
                          f'; SHA-256: {r["retained_sha256"]}</li>' for r in removed)
     html_note += "</ul></div>"
-    for _, part in parts(modified):
+    html_spans = {}
+    for path, part in parts(modified):
         if body(part):
             subtype = part.get_content_subtype()
             original_text = body_text(part)
             extra_headers = [(key, str(value)) for key, value in part.items()
                              if key.lower() not in {"content-type", "content-transfer-encoding", "mime-version"}]
             # set_content adds a newline; make it explicit for deterministic verification.
-            text = original_text + (text_note if subtype == "plain" else "\n" + html_note)
+            if subtype == 'plain':
+                text = original_text + text_note
+            else:
+                text, offset, span = compose(original_text, html_note)
+                html_spans[path] = (offset, span, original_text)
             part.set_content(text, subtype=subtype, charset="utf-8", cte="base64")
             for key, value in extra_headers:
                 if key not in part:
@@ -383,9 +386,16 @@ def transform(raw, selections, operation_id):
     if original_resources != result_resources:
         raise Unsupported("Serialization changes an unselected attachment/inline resource")
     original_bodies = {p.get_content_type(): body_text(p) for _, p in parts(original) if body(p)}
-    for _, part in parts(canonical):
-        if body(part) and not body_text(part).startswith(original_bodies[part.get_content_type()]):
-            raise Unsupported("Serialization changes original body text")
+    for path, part in parts(canonical):
+        if not body(part):
+            continue
+        actual = body_text(part)
+        if part.get_content_type() == 'text/html':
+            offset, span, original_text = html_spans[path]
+            if actual[offset:offset + len(span)] != span or actual[:offset] + actual[offset + len(span):] != original_text:
+                raise Unsupported('Serialization changes HTML source outside approved insertion span')
+        elif not actual.startswith(original_bodies['text/plain']):
+            raise Unsupported('Serialization changes original body text')
     if header_fingerprint(without_transport_auth(original), exclude_mime=True) != header_fingerprint(
             _without_marker(canonical), exclude_mime=True):
         raise Unsupported("Serialization changes correspondence headers")

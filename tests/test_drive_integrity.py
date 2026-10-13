@@ -10,7 +10,7 @@ from gmail_cleanup.engine import create, trash_original
 from gmail_cleanup.errors import CleanupError
 from gmail_cleanup.mime import digest
 from gmail_cleanup.preflight import run
-from gmail_cleanup.storage import Store
+from .helpers import Store
 from .helpers import FakeDrive, FakeGmail, message
 
 
@@ -39,9 +39,11 @@ class DriveIntegrityTests(unittest.TestCase):
         self.mutate_on_download(lambda item: item.update(version="3"))
         proof = self.verify()
         self.assertTrue(proof["verified"])
-        self.assertEqual(proof["metadata_before"]["version"], "1")
+        self.assertEqual(proof['attempts'][0]['metadata_before']['version'], '1')
         self.assertEqual(proof["metadata_after"]["version"], "3")
-        self.assertEqual(proof["metadata_changes"], [{
+        self.assertTrue(proof['checks']['unchanged_version_across_complete_download'])
+        from gmail_cleanup.drive import metadata_changes
+        self.assertEqual(metadata_changes(proof['attempts'][0]['metadata_before'], proof['attempts'][0]['metadata_after']), [{
             "field": "version", "before": "1", "after": "3",
             "classification": "benign/expected metadata mutation", "blocker": False}])
 
@@ -53,17 +55,20 @@ class DriveIntegrityTests(unittest.TestCase):
             appProperties={"processing": "complete"}))
         proof = self.verify()
         self.assertTrue(proof["verified"])
-        self.assertTrue(proof["metadata_changes"])
-        self.assertTrue(all(not c["blocker"] for c in proof["metadata_changes"]))
-        self.assertIsNone(proof["advisory_checksum_matches_download"]["before"])
+        self.assertEqual(len(proof['attempts']), 2)
+        self.assertNotIn('sha256Checksum', proof['attempts'][0]['metadata_before'])
+        self.assertTrue(proof['checks']['unchanged_version_across_complete_download'])
         self.assertTrue(proof["advisory_checksum_matches_download"]["after"])
 
-    def test_version_is_not_required_and_checksum_is_advisory(self):
+    def test_missing_version_and_contradictory_checksum_are_blockers(self):
         del self.drive.files["copy"]["version"]
+        with self.assertRaises(BackupVerificationError):
+            self.verify()
+        self.drive.files['copy']['version'] = '1'
         self.drive.files["copy"]["sha256Checksum"] = "0" * 64
-        proof = self.verify()
-        self.assertTrue(proof["verified"])
-        self.assertFalse(proof["advisory_checksum_matches_download"]["before"])
+        with self.assertRaises(BackupVerificationError) as caught:
+            self.verify()
+        self.assertFalse(caught.exception.observation['checks']['populated_checksums_match_download'])
 
     def test_changed_integrity_fields_block_even_when_downloaded_hash_matches(self):
         for change in ({"id": "other"}, {"name": "renamed.txt"}, {"parents": ["elsewhere"]},
@@ -97,8 +102,8 @@ class DriveIntegrityTests(unittest.TestCase):
             self.verify()
         proof = caught.exception.observation
         self.assertEqual(proof["downloads"][0]["sha256"], self.hash)
-        self.assertNotEqual(proof["downloads"][1]["sha256"], self.hash)
-        self.assertFalse(proof["checks"]["fresh_download_after_metadata_change_matches_source"])
+        self.assertFalse(proof['checks']['populated_checksums_match_download'])
+        self.assertFalse(proof['verified'])
 
     def test_wrong_name_or_destination_before_download_is_rejected(self):
         self.drive.files["copy"]["name"] = "wrong.txt"
@@ -142,14 +147,11 @@ class DriveGateRegressionTests(unittest.TestCase):
                 self.assertEqual(self.api.inserts, [])
                 self.api.drive.files[self.file_id] = saved
 
-    def test_version_changes_pass_insert_and_trash_without_weakening_byte_checks(self):
+    def test_continual_version_changes_block_insert_and_trash(self):
         self.api.drive.change_during_download = True
-        record = create(self.api, self.store, self.manifest, "abc123", execute=True)
-        self.assertEqual(record["state"], "verified")
-        result = trash_original(self.api, self.store, self.manifest, "abc123", execute=True,
-                               enable_trash=True, approve_plan=record["plan"]["plan_sha256"],
-                               approve_replacement=record["replacement_id"])
-        self.assertEqual(result["state"], "trashed")
+        with self.assertRaises(BackupVerificationError):
+            create(self.api, self.store, self.manifest, "abc123", execute=True)
+        self.assertEqual(self.api.inserts + self.api.trashes, [])
 
     def test_drive_rename_after_insert_blocks_trash(self):
         record = create(self.api, self.store, self.manifest, "abc123", execute=True)

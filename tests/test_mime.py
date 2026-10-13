@@ -24,7 +24,14 @@ class MimeTests(unittest.TestCase):
                 new_bodies = {p.get_content_type(): body_text(p) for _, p in parts(modified) if body(p)}
                 self.assertEqual(set(original_bodies), set(new_bodies))
                 for kind, text in original_bodies.items():
-                    self.assertTrue(new_bodies[kind].startswith(text))
+                    if kind == 'text/html':
+                        # Independent source oracle: note is inside the body, not
+                        # appended after the original complete document.
+                        offset = text.index('</body>')
+                        self.assertTrue(new_bodies[kind].startswith(text[:offset]))
+                        self.assertTrue(new_bodies[kind].endswith(text[offset:]))
+                    else:
+                        self.assertTrue(new_bodies[kind].startswith(text))
                     self.assertIn(removed[0]["drive_url"], new_bodies[kind])
                     self.assertIn("Café", new_bodies[kind])
                 # Compare all unselected binary parts, including inline resources;
