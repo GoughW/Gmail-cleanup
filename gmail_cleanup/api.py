@@ -132,7 +132,7 @@ class Gmail:
             credentials = Credentials.from_authorized_user_info(info)
             if credentials.expired and credentials.refresh_token:
                 credentials.refresh(Request())
-                write_private_json(path, json.loads(credentials.to_json()))
+                write_private_json(path, json.loads(credentials.to_json()), authoritative=True)
             if not credentials.valid:
                 raise CleanupError("OAuth credentials are not usable; authenticate again")
             actual_grant = set(credentials.granted_scopes if credentials.granted_scopes is not None else granted)
@@ -169,6 +169,14 @@ class Gmail:
             raise CleanupError("Gmail response is missing raw MIME")
         data["raw_bytes"] = decode_raw(data.pop("raw"))
         return data
+
+    def mailbox_identity(self):
+        from .mime import digest
+        data = self._execute(self.service.users().getProfile(userId="me", fields="emailAddress"))
+        email = data.get("emailAddress")
+        if not isinstance(email, str) or not email:
+            raise CleanupError("Cannot establish authenticated mailbox identity")
+        return digest(email.strip().casefold().encode())
 
     def insert(self, raw, labels, thread_id=None):
         if not self.can_modify:
@@ -208,6 +216,10 @@ class OfflineMailbox:
             return item
         except (KeyError, OSError, TypeError):
             raise CleanupError("Message is absent from offline source inventory") from None
+
+    def mailbox_identity(self):
+        from .mime import json_digest
+        return 'offline:' + json_digest(self.sources)
 
     def insert(self, *args, **kwargs):
         raise CleanupError("Offline source inventories cannot insert mail")

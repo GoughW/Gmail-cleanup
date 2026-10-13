@@ -249,15 +249,26 @@ def verify_file(drive, file_id, source_hash, source_size=None, folder_id=None,
 
 
 class Backups:
-    def __init__(self, drive, store):
+    def __init__(self, drive, store, recover_upload=False):
         self.drive, self.store = drive, store
+        self.recover_upload = recover_upload
 
     def _create_once(self, key, name, folder_id, payload, allow_upload):
         record = self.store.get_backup(key)
         if record is None:
             if not allow_upload:
                 raise CleanupError("No retained copy found; --upload-backups enables Drive backup creation only")
-            record = {"state": "upload_pending", "file_id": self.drive.allocate_id(), "expected_name": name}
+            allocation = self.store.allocation_for(key)
+            if allocation:
+                if not allocation.get('result', {}).get('file_id'):
+                    raise CleanupError('Allocation outcome uncertain; explicit recovery required')
+                file_id = allocation['result']['file_id']
+            else:
+                intent = self.store.intent('drive-allocate', {'backup_key': key, 'name': name,
+                                           'folder_id': folder_id, 'source_sha256': digest(payload) if payload is not None else 'folder'})
+                file_id = self.drive.allocate_id()
+                self.store.complete_intent(intent, {'file_id': file_id})
+            record = {"state": "upload_pending", "file_id": file_id, "expected_name": name}
             # Persist the pre-generated ID BEFORE create; reuse it after a lost response.
             self.store.save_backup(key, record, new=True)
         file_id = record["file_id"]
@@ -268,6 +279,8 @@ class Backups:
             if not allow_upload:
                 raise CleanupError("Drive upload is incomplete; recorded file ID requires recovery")
             try:
+                self.store.intent('drive-create-recovery' if self.recover_upload else 'drive-create', {'backup_key': key, 'file_id': file_id, 'name': name,
+                    'folder_id': folder_id, 'source_sha256': digest(payload) if payload is not None else 'folder'})
                 self.drive.create(file_id, name, folder_id, payload)
             except CleanupError:
                 if self.drive.get(file_id) is None:

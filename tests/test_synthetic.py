@@ -8,7 +8,7 @@ from gmail_cleanup.errors import CleanupError
 from gmail_cleanup.fixtures import CASES, TEST_MARKER
 from gmail_cleanup.manifest import load_manifest
 from gmail_cleanup.mime import date_ms, parse
-from gmail_cleanup.storage import Store
+from .helpers import Store
 from gmail_cleanup.synthetic import generate, register, run, prepare_backups
 from .helpers import FakeGmail, FakeDrive
 

@@ -17,6 +17,7 @@ from .fixtures import CASES, TEST_MARKER, fixture
 from .manifest import load_manifest
 from .mime import digest, json_digest, parse
 from .storage import Store, write_private_json
+from .paths import ACTIVE, cli_paths
 
 
 def generate(directory):
@@ -113,6 +114,9 @@ class SyntheticOnly:
         assert_synthetic(original, registry["run_id"], entry["case"], entry["raw_sha256"])
         return self.api.insert(raw, labels, thread_id)
 
+    def mailbox_identity(self):
+        return self.api.mailbox_identity()
+
 
 def run(api, store, manifest, execute=False):
     registry = manifest.get("synthetic", {})
@@ -187,6 +191,9 @@ def main(argv=None):
     runner = sub.add_parser("run")
     runner.add_argument("--manifest", required=True)
     runner.add_argument("--state", required=True)
+    runner.add_argument('--initialize-state', action='store_true')
+    runner.add_argument('--mailbox-key')
+    runner.add_argument('--journal')
     run_auth = runner.add_mutually_exclusive_group(required=True)
     run_auth.add_argument("--token")
     run_auth.add_argument("--env-auth", action="store_true")
@@ -194,6 +201,9 @@ def main(argv=None):
     preflight = sub.add_parser("preflight", help="Verify Drive backups and reconstruct registered fixtures; no Gmail writes")
     preflight.add_argument("--manifest", required=True)
     preflight.add_argument("--state", required=True)
+    preflight.add_argument('--initialize-state', action='store_true')
+    preflight.add_argument('--mailbox-key')
+    preflight.add_argument('--journal')
     preview_auth = preflight.add_mutually_exclusive_group(required=True)
     preview_auth.add_argument("--token")
     preview_auth.add_argument("--env-auth", action="store_true")
@@ -202,8 +212,11 @@ def main(argv=None):
     preflight.add_argument("--upload-backups", action="store_true")
     preflight.add_argument("--drive-folder-id")
     store = None
+    paths, path_token = None, None
     try:
         if args := parser.parse_args(argv):
+            paths = cli_paths(args)
+            path_token = ACTIVE.set(paths)
             if args.command == "generate":
                 result = generate(args.directory)
             elif args.command == "register":
@@ -213,7 +226,7 @@ def main(argv=None):
             elif args.command == "preflight":
                 manifest = load_manifest(args.manifest)
                 api = Gmail.from_environment() if args.env_auth else Gmail(args.token)
-                store = Store(args.state)
+                store = Store(args.state, initialize=args.initialize_state, mailbox_key=args.mailbox_key, journal=args.journal)
                 report, resolved = prepare_backups(api, store, manifest, args.upload_backups, args.drive_folder_id)
                 write_private_json(args.output, report)
                 if resolved:
@@ -225,7 +238,7 @@ def main(argv=None):
             else:
                 manifest = load_manifest(args.manifest)
                 api = Gmail.from_environment(require_modify=args.execute) if args.env_auth else Gmail(args.token, require_modify=args.execute)
-                store = Store(args.state)
+                store = Store(args.state, initialize=args.initialize_state, mailbox_key=args.mailbox_key, journal=args.journal)
                 result = run(api, store, manifest, execute=args.execute)
             print(json.dumps(result, sort_keys=True))
             return 2 if any(r["state"] == "verify_failed" for r in result.get("results", [])) else 0
@@ -236,6 +249,10 @@ def main(argv=None):
     finally:
         if store:
             store.close()
+        if path_token is not None:
+            ACTIVE.reset(path_token)
+        if paths is not None:
+            paths.close()
 
 
 if __name__ == "__main__":

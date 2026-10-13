@@ -9,6 +9,7 @@ from .errors import CleanupError, Unsupported
 from .manifest import load_manifest, load_backup_manifest, select
 from .mime import date_ms, inventory, parse, validate_structure
 from .storage import Store, write_private_json
+from .paths import ACTIVE, cli_paths
 
 
 def backend(args, writes=False):
@@ -37,6 +38,11 @@ def summary(record, dry_run=False):
     return result
 
 
+def open_store(args):
+    return Store(args.state, initialize=getattr(args, 'initialize_state', False),
+                 mailbox_key=getattr(args, 'mailbox_key', None), journal=getattr(args, 'journal', None))
+
+
 def parser():
     root = argparse.ArgumentParser(description="Explicit Gmail MIME replacement; dry-run by default")
     commands = root.add_subparsers(dest="command", required=True)
@@ -55,8 +61,12 @@ def parser():
     preview.add_argument("--output", required=True, help="Private per-message report")
     preview.add_argument("--resolved-manifest", help="Write a version-1 creation manifest only if every message passes")
     preview.add_argument("--state", default=".private/audit.sqlite")
+    preview.add_argument('--initialize-state', action='store_true')
+    preview.add_argument('--mailbox-key')
+    preview.add_argument('--journal')
     preview.add_argument("--drive-folder-id")
     preview.add_argument("--upload-backups", action="store_true", help="Allow new Drive files/folder; Gmail remains read-only")
+    preview.add_argument('--recover-drive-upload', action='store_true', help='Explicitly recover an uncertain upload using the exact persisted Drive ID')
     preview_sources = preview.add_mutually_exclusive_group(required=True)
     preview_sources.add_argument("--token")
     preview_sources.add_argument("--env-auth", action="store_true")
@@ -64,6 +74,9 @@ def parser():
     workflow = commands.add_parser("workflow", help="Sequential disposable-account test; stops on first failure")
     workflow.add_argument("--manifest", required=True, help="Version-2 exact ID/part/hash allowlist")
     workflow.add_argument("--state", default=".private/audit.sqlite")
+    workflow.add_argument('--initialize-state', action='store_true')
+    workflow.add_argument('--mailbox-key')
+    workflow.add_argument('--journal')
     workflow.add_argument("--output", required=True)
     workflow.add_argument("--execute", action="store_true")
     workflow.add_argument("--enable-trash", action="store_true")
@@ -78,6 +91,9 @@ def parser():
     common.add_argument("--manifest", required=True)
     common.add_argument("--message-id", required=True, help="One explicit allowlisted Gmail message ID")
     common.add_argument("--state", default=".private/audit.sqlite")
+    common.add_argument('--initialize-state', action='store_true', help='Explicitly create NEW state and independent recovery journal')
+    common.add_argument('--mailbox-key', help='Expected authenticated mailbox SHA-256 identity')
+    common.add_argument('--journal', help='Independent recovery directory; never roll it back with SQLite')
     sources = common.add_mutually_exclusive_group()
     sources.add_argument("--token")
     sources.add_argument("--offline-sources")
@@ -98,13 +114,27 @@ def parser():
     trash.add_argument("--approve-plan")
     trash.add_argument("--approve-replacement")
     commands.add_parser("status", parents=[common], help="Inspect durable state without mailbox access")
+    restore = commands.add_parser('recover-state', help='Explicit LOCAL journal-to-database recovery; never submits a remote mutation')
+    restore.add_argument('--state', required=True)
+    restore.add_argument('--journal')
+    restore.add_argument('--mailbox-key')
+    restore.set_defaults(offline_sources=None, message_id=None, initialize_state=False)
     return root
 
 
 def main(argv=None):
     args = parser().parse_args(argv)
     store = None
+    paths = None
+    token = None
     try:
+        paths = cli_paths(args)
+        token = ACTIVE.set(paths)
+        if args.command == 'recover-state':
+            store = Store(args.state, journal=args.journal, mailbox_key=args.mailbox_key)
+            store.restore_from_journal()
+            print(json.dumps({'recovered_locally': True, 'remote_mutations': 0}))
+            return 0
         if args.command == "auth":
             authenticate(args.credentials, args.token, modify=args.modify, drive=args.drive)
             print(json.dumps({"authenticated": True, "write_scope": args.modify, "drive_scope": args.drive}))
@@ -123,7 +153,7 @@ def main(argv=None):
                 write_private_json(args.output, report)
                 print(json.dumps({"completed": False, "stopped_at": report["stopped_at"], "error": str(exc)}))
                 return 2
-            store = Store(args.state)
+            store = open_store(args)
             report = run(api, store, manifest, args.output, args.execute, args.enable_trash,
                          args.disposable_test_account, args.upload_backups, args.drive_folder_id)
             print(json.dumps({"completed": report["completed"], "stopped_at": report["stopped_at"],
@@ -133,13 +163,14 @@ def main(argv=None):
             from .preflight import run
             manifest = load_backup_manifest(args.manifest)
             api = backend(args, writes=False)
-            store = Store(args.state)
+            store = open_store(args)
             drive, error = None, None
             try:
                 drive = api.drive
             except CleanupError as exc:
                 error = str(exc)
-            report, resolved = run(api, store, manifest, drive, error, args.drive_folder_id, args.upload_backups)
+            report, resolved = run(api, store, manifest, drive, error, args.drive_folder_id, args.upload_backups,
+                                   recover_upload=args.recover_drive_upload)
             write_private_json(args.output, report)
             if resolved and args.resolved_manifest:
                 write_private_json(args.resolved_manifest, resolved)
@@ -173,7 +204,7 @@ def main(argv=None):
             print(json.dumps({"message_id": args.message_id, "inspected": True,
                               "unsupported_reason": reason}))
             return 0
-        store = Store(args.state)
+        store = open_store(args)
         if args.command == "plan":
             record = plan_message(backend(args), store, manifest, args.message_id)
             write_private_json(args.output, record["plan"])
@@ -220,3 +251,7 @@ def main(argv=None):
     finally:
         if store is not None:
             store.close()
+        if token is not None:
+            ACTIVE.reset(token)
+        if paths is not None:
+            paths.close()

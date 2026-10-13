@@ -10,6 +10,21 @@ from .mime import (MARKER, date_ms, digest, header_fingerprint, inventory, json_
                    parse, transform, transport_header_changes, changed_headers,
                    semantic_root, all_header_differences)
 
+SAFETY_POLICY = 2
+TRANSFORMATION_POLICY = 2
+
+
+def current_policy(plan):
+    return plan.get('safety_policy') == SAFETY_POLICY and plan.get('transformation_policy') == TRANSFORMATION_POLICY
+
+
+def mutation_binding(record):
+    plan = record['plan']
+    if record['message_id'] != plan['message_id'] or record['message_id'] != plan['original']['id']:
+        raise CleanupError('Operation original identity conflicts')
+    return {'original_id': record['message_id'], 'operation_id': plan['operation_id'],
+            'plan_sha256': plan['plan_sha256']}
+
 
 def snapshot(message):
     try:
@@ -29,7 +44,8 @@ def build_plan(message, selections, operation_id):
     original = snapshot(message)
     raw, removed, modified = transform(message["raw_bytes"], selections, operation_id)
     parsed_original = parse(message["raw_bytes"])
-    plan = {"version": 1, "message_id": original["id"], "operation_id": operation_id,
+    plan = {"version": 1, "safety_policy": SAFETY_POLICY, "transformation_policy": TRANSFORMATION_POLICY,
+            "message_id": original["id"], "operation_id": operation_id,
             "original": original, "removed": removed, "selections": deepcopy(selections),
             "original_inventory": inventory(parsed_original),
             "original_headers_sha256": header_fingerprint(parsed_original, exclude_mime=True),
@@ -51,6 +67,9 @@ def build_plan(message, selections, operation_id):
 def plan_message(api, store, manifest, message_id, operation_id=None, expected_original=None):
     selections = select(manifest, message_id)
     existing = store.get(message_id)
+    if existing and not current_policy(existing['plan']):
+        return existing  # Historical inspection only; never rewrite an approved plan.
+    store.require_current(api)
     operation_id = existing["plan"]["operation_id"] if existing else (operation_id or uuid.uuid4().hex)
     message = api.get(message_id)
     if message.get("id") != message_id:
@@ -149,6 +168,12 @@ def verify(api, store, record):
     if not record.get("replacement_id"):
         raise CleanupError("No recorded replacement ID; reconcile the incomplete insert first")
     current_state = record["state"]
+    if not current_policy(record['plan']) or store.recovery_error:
+        result = check_replacement(api.get(record['replacement_id']), record['plan'])
+        result.update(current_policy_eligible=False, historical_only=True)
+        observed = deepcopy(record)
+        observed.update(state='recovery_only', verification=result)
+        return observed
     try:
         original = unchanged_original(api, record)
         expected_raw = approved_reconstruction(original, record["plan"])
@@ -176,6 +201,11 @@ def verify(api, store, record):
         except CleanupError:
             result["checks"]["retained_drive_files"] = False
         result["passed"] = all(result["checks"].values())
+        store.require_current(api)
+        intent = store.get_intent(record.get('insert_intent_key', ''))
+        result['checks']['current_policy_intent_binding'] = bool(intent and intent['action'] == 'gmail-insert'
+            and all(intent['binding'].get(k) == v for k,v in mutation_binding(record).items()))
+        result['passed'] = all(result['checks'].values())
     except CleanupError:
         result = {"passed": False, "checks": {"replacement_fetch": False},
                   "differences": {}, "observed": {"id": record["replacement_id"]}}
@@ -195,6 +225,9 @@ def create(api, store, manifest, message_id, execute=False):
         raise CleanupError("Insert outcome is uncertain; reconcile a replacement ID before retrying")
     if not execute:
         return record
+    store.require_current(api)
+    if not current_policy(record['plan']):
+        raise CleanupError('Legacy plan requires explicit recovery/replanning; no insertion eligibility')
     original = unchanged_original(api, record)
     plan, raw = build_plan(original, record["plan"]["selections"], record["plan"]["operation_id"])
     if plan != record["plan"]:
@@ -209,6 +242,7 @@ def create(api, store, manifest, message_id, execute=False):
         raise
     record.pop("drive_verification_failure", None)
     unchanged_original(api, record)  # downloads can take time; recheck before insertion intent
+    record['insert_intent_key'] = store.intent('gmail-insert', mutation_binding(record))
     record["state"] = "insert_pending"
     store.save(record, expected_state="planned")
     # Any exception or crash from here is an uncertain insert. No blind retry.
@@ -223,8 +257,12 @@ def create(api, store, manifest, message_id, execute=False):
 
 
 def reconcile(api, store, manifest, message_id, replacement_id, execute=False):
+    if isinstance(replacement_id, list):
+        if len(replacement_id) != 1:
+            raise CleanupError('Zero or multiple candidates cannot resolve an uncertain insertion')
+        replacement_id = replacement_id[0]
     record = require_record(store, manifest, message_id)
-    if record["state"] not in {"insert_pending", "inserted", "verify_failed", "verified"}:
+    if record["state"] not in {"planned", "insert_pending", "inserted", "verify_failed", "verified"}:
         raise CleanupError("No incomplete replacement insertion to reconcile")
     if record["replacement_id"] and record["replacement_id"] != replacement_id:
         raise CleanupError("A different replacement ID is already recorded")
@@ -233,6 +271,14 @@ def reconcile(api, store, manifest, message_id, replacement_id, execute=False):
     if (message.get("id") != replacement_id or replacement_id == message_id
             or parsed.get_all(MARKER) != [record["plan"]["operation_id"]]):
         raise CleanupError("Candidate is not this operation's distinct replacement")
+    if not current_policy(record['plan']) or store.recovery_error or not record.get('insert_intent_key'):
+        result = check_replacement(message, record['plan'])
+        observed = deepcopy(record)
+        observed.update(state='recovery_only', replacement_id=replacement_id,
+                        verification={**result, 'current_policy_eligible': False, 'historical_only': True})
+        if execute:
+            store.record_recovery(observed)
+        return observed if execute else observed['verification']
     if not execute:
         original = unchanged_original(api, record)
         return check_replacement(message, record["plan"], approved_reconstruction(original, record["plan"]), original["raw_bytes"])
@@ -247,6 +293,9 @@ def trash_original(api, store, manifest, message_id, execute=False, enable_trash
     record = require_record(store, manifest, message_id)
     if not execute:
         return record
+    store.require_current(api)
+    if not current_policy(record['plan']):
+        raise CleanupError('Legacy historical verification does not grant current-policy Trash eligibility')
     if (not enable_trash or approve_plan != record["plan"]["plan_sha256"]
             or approve_replacement != record["replacement_id"] or not approve_replacement):
         raise CleanupError("Trash requires separate enablement and exact plan/replacement approval")
@@ -268,6 +317,8 @@ def trash_original(api, store, manifest, message_id, execute=False, enable_trash
                              "replacement_before_trash": correspondence_observation(replacement)}
     record["approval"] = {"action": "trash-original", "plan_sha256": approve_plan,
                           "replacement_id": approve_replacement}
+    record['trash_intent_key'] = store.intent('gmail-trash', {**mutation_binding(record),
+        'replacement_id': record['replacement_id'], 'approval': record['approval']})
     record["state"] = "trash_pending"
     store.save(record, expected_state="verified")
     api.trash(message_id)  # Exact message only; durable intent and no automatic retry.

@@ -7,7 +7,7 @@ import unittest
 from gmail_cleanup.engine import (build_plan, check_replacement, create, plan_message,
                                   trash_original, verify)
 from gmail_cleanup.mime import parse, parts, SERVER_TRANSPORT_HEADERS
-from gmail_cleanup.storage import Store
+from .helpers import Store
 from .helpers import FakeGmail, message
 
 
@@ -115,6 +115,8 @@ class ServerHeaderTests(unittest.TestCase):
                 planned = plan_message(api, store, manifest, "abc123")
                 # Model the prior strict verifier's persisted failure and known ID.
                 _, raw = build_plan(original, planned["plan"]["selections"], planned["plan"]["operation_id"])
+                from gmail_cleanup.engine import mutation_binding
+                planned['insert_intent_key'] = store.intent('gmail-insert', mutation_binding(planned))
                 response = api.insert(raw, planned["plan"]["original"]["labels"], original["threadId"])
                 planned.update(state="verify_failed", replacement_id=response["id"], verification={"passed": False})
                 store.save(planned, expected_state="planned")

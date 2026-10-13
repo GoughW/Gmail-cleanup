@@ -14,7 +14,8 @@ from gmail_cleanup.engine import (create, plan_message, trash_original,
                                  verify_after_trash)
 from gmail_cleanup.errors import CleanupError
 from gmail_cleanup.mime import parse, parts, digest
-from gmail_cleanup.storage import Store, write_private_json
+from gmail_cleanup.storage import write_private_json
+from .helpers import Store
 from gmail_cleanup.workflow import run
 from .helpers import FakeDrive, FakeGmail, message
 
@@ -398,7 +399,7 @@ class SequentialWorkflowTests(unittest.TestCase):
         with patch("gmail_cleanup.cli.Gmail.from_environment", return_value=self.api) as factory, redirect_stdout(stdout):
             code = main(["workflow", "--env-auth", "--manifest", str(path),
                          "--state", str(self.root / "cli.sqlite"), "--output", str(self.output),
-                         "--execute", "--enable-trash", "--disposable-test-account", "--upload-backups"])
+                         "--execute", "--enable-trash", "--disposable-test-account", "--upload-backups", '--initialize-state', '--mailbox-key', 'fake-mailbox'])
         self.assertEqual(code, 0)
         factory.assert_called_once_with(require_modify=True)
         self.assertEqual(json.loads(stdout.getvalue())["trashed_original_count"], 5)

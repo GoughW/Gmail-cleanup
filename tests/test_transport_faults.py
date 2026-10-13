@@ -160,6 +160,36 @@ class TransportFaultTests(unittest.TestCase):
                     self.assertEqual(len(server.requests),1)
                 finally:server.close()
 
+    def test_actual_sdk_unknown_insert_keeps_engine_intent_and_original(self):
+        from gmail_cleanup.engine import plan_message,create
+        from .helpers import message,FakeGmail,Store
+        original,manifest=message()
+        api=FakeGmail({'abc123':original})
+        server=FaultServer('missing')
+        def insert(raw,labels,thread_id):
+            import base64
+            http=authorized_transport(FakeCredentials(),timeout=0.08,proxy_info=None)
+            service=build('gmail','v1',http=http,cache_discovery=False,static_discovery=True)
+            request=service.users().messages().insert(userId='me',body={'raw':base64.urlsafe_b64encode(raw).decode(),
+                                                     'labelIds':labels,'threadId':thread_id})
+            request.uri=server.url
+            return Gmail._execute(request)
+        api.insert=insert
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                store=Store(Path(directory)/'state.sqlite')
+                try:
+                    plan_message(api,store,manifest,'abc123')
+                    with self.assertRaises(CleanupError):create(api,store,manifest,'abc123',execute=True)
+                    self.assertEqual(store.get('abc123')['state'],'insert_pending')
+                    self.assertEqual(len(server.requests),1)
+                    with self.assertRaises(CleanupError):create(api,store,manifest,'abc123',execute=True)
+                    self.assertEqual(len(server.requests),1)
+                    self.assertEqual(api.messages['abc123'],original)
+                    self.assertEqual(api.trashes,[])
+                finally:store.close()
+        finally:server.close()
+
     def test_tls_verification_and_explicit_ca_trust_preserved(self):
         from cryptography import x509
         from cryptography.hazmat.primitives import hashes,serialization

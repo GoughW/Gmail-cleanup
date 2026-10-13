@@ -12,7 +12,8 @@ UNRESOLVED_URL = "https://drive.google.com/file/d/UNRESOLVED_BACKUP/view"
 
 
 def run(api, store, manifest, drive=None, drive_error=None, folder_id=None, allow_upload=False,
-        stop_on_failure=False):
+        stop_on_failure=False, recover_upload=False):
+    store.require_current(api)
     rows, resolved, before = [], {}, {}
     for message_id in manifest["allowlist"]:
         row = {"message_id": message_id, "subject": None, "attachments_found": [],
@@ -44,6 +45,8 @@ def run(api, store, manifest, drive=None, drive_error=None, folder_id=None, allo
             row["operation_id"] = operation_id
             # Validate the whole transformation before any Drive upload is attempted.
             plan, raw = build_plan(message, selections, operation_id)
+            store.context = {'original_id': message_id, 'operation_id': operation_id,
+                             'plan_sha256': plan['plan_sha256']}
             for choice, selection in zip(choices, selections):
                 part = indexed[choice["part"]]
                 payload = part.get_payload(decode=True)
@@ -55,7 +58,7 @@ def run(api, store, manifest, drive=None, drive_error=None, folder_id=None, allo
                 try:
                     if drive is None:
                         raise CleanupError(drive_error or "Drive client is unavailable")
-                    proof = Backups(drive, store).ensure(payload, part.get_filename(), folder_id,
+                    proof = Backups(drive, store, recover_upload=recover_upload).ensure(payload, part.get_filename(), folder_id,
                                                        choice.get("drive_file_id"), allow_upload)
                     backup.update(proof, drive_verified=True)
                     selection["drive_url"] = proof["drive_url"]

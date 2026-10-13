@@ -13,7 +13,8 @@ from gmail_cleanup.api import Gmail, MODIFY_SCOPE, READ_SCOPE, DRIVE_SCOPE, auth
 from gmail_cleanup.cli import main
 from gmail_cleanup.errors import CleanupError
 from gmail_cleanup.manifest import load_manifest
-from gmail_cleanup.storage import Store, write_private_json
+from gmail_cleanup.storage import write_private_json
+from .helpers import Store
 from gmail_cleanup.synthetic import generate
 
 
@@ -242,7 +243,9 @@ class CliTests(unittest.TestCase):
 
     def plan(self):
         output = self.root / "plan.json"
-        code, result = self.call(["plan", *self.common, "--offline-sources", str(self.sources), "--output", str(output)])
+        from gmail_cleanup.api import OfflineMailbox
+        code, result = self.call(["plan", *self.common, "--offline-sources", str(self.sources), "--output", str(output),
+                                 '--initialize-state', '--mailbox-key', OfflineMailbox(self.sources).mailbox_identity()])
         self.assertEqual(code, 0)
         self.assertTrue(output.exists())
         self.assertEqual(output.stat().st_mode & 0o777, 0o600)
@@ -327,7 +330,7 @@ class CliTests(unittest.TestCase):
         victim.write_text("preserved")
         link = self.root / "link.json"
         link.symlink_to(victim)
-        with self.assertRaises(OSError):
+        with self.assertRaises(CleanupError):
             write_private_json(link, {"should": "not overwrite"})
         self.assertEqual(victim.read_text(), "preserved")
 

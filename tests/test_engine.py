@@ -7,7 +7,7 @@ from gmail_cleanup.engine import (check_replacement, create, plan_message, recon
                                  require_record, trash_original)
 from gmail_cleanup.errors import CleanupError, Unsupported
 from gmail_cleanup.mime import parse
-from gmail_cleanup.storage import Store
+from .helpers import Store
 from .helpers import FakeGmail, message
 
 

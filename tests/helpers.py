@@ -4,6 +4,15 @@ from gmail_cleanup.errors import CleanupError
 from gmail_cleanup.fixtures import fixture, TEST_MARKER
 from gmail_cleanup.mime import date_ms, parse, parts, digest
 from gmail_cleanup.drive import PURPOSE, FOLDER_TYPE
+from gmail_cleanup.storage import Store as ProductionStore
+
+
+def Store(path, **kwargs):
+    """Tests explicitly initialize fresh fake-account state; restarts never reset it."""
+    from pathlib import Path
+    result = ProductionStore(path, initialize=not Path(path).exists(), mailbox_key="fake-mailbox", **kwargs)
+    result.context = {'original_id': 'fake-source', 'operation_id': 'fake-operation', 'plan_sha256': 'fake-plan'}
+    return result
 
 
 class FakeDrive:
@@ -108,6 +117,9 @@ class FakeGmail:
         if message_id not in self.messages:
             raise CleanupError("Simulated missing ID")
         return deepcopy(self.messages[message_id])
+
+    def mailbox_identity(self):
+        return "fake-mailbox"
 
     def insert(self, raw, labels, thread_id=None):
         if self.reject_insert:
