@@ -1,16 +1,16 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools==78.1.0", "wheel==0.45.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "gmail-attachment-cleanup"
 version = "0.1.0"
 description = "Conservative, explicit Gmail attachment replacement with offline-first tests"
-requires-python = ">=3.11"
-dependencies = []
+requires-python = ">=3.12,<3.13"
+dependencies = ["html5lib==1.1"]
 
 [project.optional-dependencies]
-gmail = ["google-api-python-client>=2.160,<3", "google-auth-oauthlib>=1.2,<2", "PySocks>=1.7.1,<2"]
+gmail = ["google-api-python-client==2.201.0", "google-auth==2.61.0", "google-auth-httplib2==0.4.4", "httplib2==0.32.0", "google-auth-oauthlib==1.5.0", "PySocks==1.7.1"]
 
 [project.scripts]
 gmail-cleanup = "gmail_cleanup.cli:main"

@@ -102,10 +102,9 @@ class Gmail:
 
     def _configure(self, credentials, require_modify):
         from googleapiclient.discovery import build
-        from google_auth_httplib2 import AuthorizedHttp
-        import httplib2
+        from .transport import authorized_transport
         ca_bundle = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("SSL_CERT_FILE")
-        http = AuthorizedHttp(credentials, http=httplib2.Http(timeout=30, ca_certs=ca_bundle))
+        http = authorized_transport(credentials, timeout=30, ca_certs=ca_bundle)
         self.credentials = credentials
         self.http = http
         self.service = build("gmail", "v1", http=http,
