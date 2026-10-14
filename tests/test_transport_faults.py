@@ -49,6 +49,9 @@ class FaultServer:
                 self.wfile.write(body)
                 self.wfile.flush()
                 self.close_connection = True  # Deliberately stale unadvertised keep-alive.
+            def do_CONNECT(self):
+                self.send_response(200, 'Connection established')
+                self.end_headers()
             def do_POST(self):
                 owner.requests.append(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
                 if mode in {"missing", "reset", "bad-status", "timeout"}:
@@ -219,4 +222,17 @@ class TransportFaultTests(unittest.TestCase):
                 self.assertEqual(Gmail._execute(self.request(server,transport=http))['id'],'fake-replacement')
                 self.assertEqual(len(server.requests),1)
                 self.assertFalse(http.http.disable_ssl_certificate_validation)
+        finally:server.close()
+
+    def test_local_http_connect_proxy_is_preserved_without_external_forwarding(self):
+        import httplib2
+        server=FaultServer(200)
+        try:
+            proxy=httplib2.ProxyInfo(httplib2.socks.PROXY_TYPE_HTTP,'127.0.0.1',server.server.server_port,proxy_rdns=True)
+            http=authorized_transport(FakeCredentials(),timeout=2,proxy_info=proxy)
+            request=self.request(server,transport=http)
+            # Fake hostname is handled entirely by the local proxy fixture.
+            request.uri='http://not-a-real-service.invalid:80/mutation'
+            self.assertEqual(Gmail._execute(request)['id'],'fake-replacement')
+            self.assertEqual(len(server.requests),1)
         finally:server.close()

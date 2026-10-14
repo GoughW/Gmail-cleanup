@@ -89,6 +89,7 @@ class Store:
             except BlockingIOError:
                 raise CleanupError('Another operator holds this state lock') from None
             self.target.check()
+            self.check_sidecars()
             exists = self.path.exists()
             if initialize:
                 if exists or self.journal_path.exists() or not mailbox_key:
@@ -152,6 +153,18 @@ class Store:
             maps[event['kind']][event['key']] = deepcopy(event['value'])
         return maps
 
+    def check_sidecars(self):
+        # SQLite owns creation/removal; pinning a nonexistent sidecar inode would
+        # reject its normal transactions. Inspect every present leaf instead.
+        for suffix in ('-journal', '-wal', '-shm'):
+            try:
+                info = os.stat(self.path.name + suffix, dir_fd=self.target.fd, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or info.st_uid != os.getuid() or info.st_mode & 0o077):
+                raise CleanupError('SQLite sidecar must be private, regular and singly linked')
+
     def _set_head(self, records):
         from .mime import json_digest
         head = {'store_id': self.journal.header['store_id'], 'mailbox_key': self.mailbox_key,
@@ -161,6 +174,7 @@ class Store:
     def check_history(self):
         from .mime import json_digest
         self.target.check()
+        self.check_sidecars()
         if self.journal is None:
             raise CleanupError('Missing journal: legacy/restored state is recovery-only')
         records = self.journal.records()

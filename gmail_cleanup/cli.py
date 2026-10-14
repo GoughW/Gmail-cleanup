@@ -4,7 +4,7 @@ import sqlite3
 
 from .api import Gmail, OfflineMailbox, authenticate
 from .engine import (create, plan_message, reconcile, require_record, snapshot,
-                     trash_original, verify)
+                     trash_original, verify, current_policy)
 from .errors import CleanupError, Unsupported
 from .manifest import load_manifest, load_backup_manifest, select
 from .mime import date_ms, inventory, parse, validate_structure
@@ -33,12 +33,17 @@ def summary(record, dry_run=False):
               "replacement_size_bytes": record["plan"]["expected"]["size_bytes"],
               "net_size_savings_bytes": record["plan"]["net_size_savings_bytes"],
               "predicted_ordering_delta_ms": record["plan"]["ordering_delta_ms_if_date_header_used"]}
+    result['policy_current'] = current_policy(record['plan'])
+    result['execution_eligibility'] = 'requires fresh authenticated safety checks' if result['policy_current'] else 'historical inspection/recovery only'
     if record.get("verification"):
         result["verification"] = record["verification"]
     return result
 
 
 def open_store(args):
+    paths = ACTIVE.get()
+    if paths is not None and paths.managed is not None:
+        paths.managed.check()
     return Store(args.state, initialize=getattr(args, 'initialize_state', False),
                  mailbox_key=getattr(args, 'mailbox_key', None), journal=getattr(args, 'journal', None))
 
@@ -234,7 +239,7 @@ def main(argv=None):
             record = require_record(store, manifest, args.message_id)
         print(json.dumps(summary(record, dry_run=args.command in {"create", "trash"} and not args.execute),
                          sort_keys=True))
-        return 2 if record["state"] in {"verify_failed", "trashed_verify_failed"} else 0
+        return 2 if record["state"] in {"verify_failed", "trashed_verify_failed", 'recovery_only'} else 0
     except (CleanupError, OSError, sqlite3.Error) as exc:
         # Third-party exception strings may contain raw requests or OAuth values.
         safe = str(exc) if isinstance(exc, CleanupError) else "Local private-file/state operation failed"

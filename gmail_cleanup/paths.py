@@ -87,13 +87,34 @@ class PathSession:
         self.journal = Path(journal or (str(self.state) + ".recovery")).absolute() if self.state else None
         self.reserved = self.inputs[:]
         if self.state:
-            state_identity = identity(self.state)
+            sensitive = [Path(str(self.state) + suffix) for suffix in ('', '-journal', '-wal', '-shm', '.lock')]
             for source in self.inputs:
-                if key(source) == key(self.state) or (state_identity is not None and state_identity == identity(source)):
-                    raise CleanupError('State aliases a protected input')
+                for storage in sensitive:
+                    storage_identity = identity(storage)
+                    if key(source) == key(storage) or (storage_identity is not None and storage_identity == identity(source)):
+                        raise CleanupError('State/sidecar aliases a protected input')
+                journal_root = Path(key(self.journal))
+                if Path(key(source)) == journal_root or journal_root in Path(key(source)).parents:
+                    raise CleanupError('Input aliases authoritative recovery storage')
             self.reserved += [Path(str(self.state) + suffix) for suffix in ("", "-journal", "-wal", "-shm", ".lock", ".inspection")]
         self.targets = {}
+        self.managed = None
         try:
+            if self.state:
+                self.managed = Target(self.state)
+                for suffix in ('', '-journal', '-wal', '-shm', '.lock'):
+                    try:
+                        info = os.stat(self.managed.name + suffix, dir_fd=self.managed.fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue
+                    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                            or info.st_uid != os.getuid() or info.st_mode & 0o077):
+                        raise CleanupError('Managed state/sidecar must be private, regular and singly linked')
+                if self.journal.exists() or self.journal.is_symlink():
+                    info = self.journal.lstat()
+                    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                            or info.st_mode & 0o077):
+                        raise CleanupError('Recovery directory must be private, owned and not a symlink')
             for path in outputs:
                 if path:
                     self.target(path)
@@ -136,6 +157,9 @@ class PathSession:
                 seen.add(canonical)
 
     def close(self):
+        if self.managed is not None:
+            self.managed.close()
+            self.managed = None
         for target in self.targets.values():
             target.close()
         self.targets.clear()
@@ -148,15 +172,18 @@ def cli_paths(args):
         outputs.append(args.token)
     else:
         inputs.append(getattr(args, "token", None))
-    inventory = getattr(args, "offline_sources", None)
-    if inventory:
-        data = json.loads(Path(inventory).read_text())
-        inputs.extend(Path(inventory).absolute().parent / row["raw_file"] for row in data.values())
-    if getattr(args, "command", None) == "register":
-        index = Path(args.directory) / "fixtures.json"
-        inputs.append(index)
-        data = json.loads(index.read_text())
-        inputs.extend(index.parent / row["raw_file"] for row in data["cases"].values())
+    try:
+        inventory = getattr(args, "offline_sources", None)
+        if inventory:
+            data = json.loads(Path(inventory).read_text())
+            inputs.extend(Path(inventory).absolute().parent / row["raw_file"] for row in data.values())
+        if getattr(args, "command", None) == "register":
+            index = Path(args.directory) / "fixtures.json"
+            inputs.append(index)
+            data = json.loads(index.read_text())
+            inputs.extend(index.parent / row["raw_file"] for row in data["cases"].values())
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise CleanupError('Cannot validate referenced local input paths') from None
     session = PathSession(inputs, outputs, getattr(args, "state", None), getattr(args, "journal", None))
     try:
         session.validate_outputs(outputs)

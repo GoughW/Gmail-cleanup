@@ -59,6 +59,14 @@ class ApiTests(unittest.TestCase):
         self.messages.insert.assert_not_called()
         self.messages.trash.assert_not_called()
 
+    def test_trash_targets_only_exact_original_message_and_never_thread_or_other_write(self):
+        self.messages.trash.return_value.execute.return_value={'id':'explicit-original'}
+        self.assertEqual(self.api.trash('explicit-original')['id'],'explicit-original')
+        self.messages.trash.assert_called_once_with(userId='me',id='explicit-original')
+        self.api.service.users.return_value.threads.assert_not_called()
+        for operation in ('delete','batchDelete','send','modify','batchModify'):
+            getattr(self.messages,operation).assert_not_called()
+
     def test_api_errors_do_not_leak_email_or_token_contents(self):
         self.messages.insert.return_value.execute.side_effect = ValueError("RAW-EMAIL-CONTENT SECRET-TOKEN")
         with self.assertRaises(CleanupError) as error:

@@ -33,7 +33,8 @@ class Journal:
         self.identity = info.st_dev, info.st_ino
         try:
             self.header = self.read("genesis.json")
-            if (set(self.header) != {"version", "store_id", "mailbox_key"}
+            if (not isinstance(self.header, dict)
+                    or set(self.header) != {"version", "store_id", "mailbox_key"}
                     or self.header["version"] != 1 or not self.header["mailbox_key"]):
                 raise CleanupError("Malformed recovery genesis; recovery review required")
             self.records()
@@ -59,6 +60,8 @@ class Journal:
                 os.close(fd)
 
     def records(self):
+        if self.read("genesis.json") != self.header:
+            raise CleanupError("Recovery genesis changed; mutations prohibited")
         names = sorted(os.listdir(self.fd))
         if "genesis.json" not in names:
             raise CleanupError("Missing recovery genesis")
@@ -69,6 +72,12 @@ class Journal:
             if name != f"{sequence:012d}.json":
                 raise CleanupError("Missing/torn/conflicting recovery history")
             record = self.read(name)
+            if (not isinstance(record, dict)
+                    or set(record) != {"sequence", "previous", "store_id", "mailbox_key", "kind", "key", "value", "hash"}
+                    or record.get('kind') not in {'operations', 'backups', 'intents'}
+                    or not isinstance(record.get('key'), str)
+                    or not isinstance(record.get('value'), dict)):
+                raise CleanupError("Malformed authoritative recovery record")
             claimed = record.get("hash")
             payload = {k: v for k, v in record.items() if k != "hash"}
             if (claimed != json_digest(payload) or record.get("previous") != previous

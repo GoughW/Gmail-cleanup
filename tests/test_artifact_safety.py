@@ -22,6 +22,17 @@ def exclusive_creator(path, value, queue):
         queue.put("lost")
 
 
+def interrupted_replace(path, phase, pipe):
+    real_replace=os.replace
+    def replace(*args, **kwargs):
+        if phase=='before':pipe.send(phase);pipe.recv()
+        result=real_replace(*args,**kwargs)
+        if phase=='after':pipe.send(phase);pipe.recv()
+        return result
+    with patch('gmail_cleanup.storage.os.replace',side_effect=replace):
+        write_private_json(path,{'new':True})
+
+
 class ArtifactSafetyTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -173,3 +184,52 @@ class ArtifactSafetyTests(unittest.TestCase):
             code=main(['auth','--credentials',str(self.path),'--token',str(self.path),'--modify','--drive'])
         self.assertEqual(code,2);auth.assert_not_called()
         self.assertEqual(self.path.read_bytes(),self.before)
+
+    def test_sigkill_before_and_after_replace_never_publishes_partial_json(self):
+        import signal
+        context=multiprocessing.get_context('spawn')
+        for phase in ('before','after'):
+            write_private_json(self.path,{'old':True})
+            parent,child=context.Pipe()
+            process=context.Process(target=interrupted_replace,args=(str(self.path),phase,child))
+            process.start()
+            try:
+                self.assertTrue(parent.poll(15));self.assertEqual(parent.recv(),phase)
+                os.kill(process.pid,signal.SIGKILL);process.join(10)
+                self.assertEqual(process.exitcode,-signal.SIGKILL)
+                self.assertEqual(json.loads(self.path.read_bytes()),{'old':True} if phase=='before' else {'new':True})
+            finally:
+                if process.is_alive():process.kill();process.join(5)
+                parent.close();child.close()
+
+    def test_state_sidecars_cannot_alias_inputs_or_be_linked(self):
+        state=self.root/'state.sqlite'
+        for suffix in ('','-wal','-shm','-journal'):
+            with self.subTest(suffix=suffix),self.assertRaises(CleanupError):
+                PathSession(inputs=[Path(str(state)+suffix)],state=state)
+        store=Store(state,initialize=True,mailbox_key='fake')
+        store.close()
+        for suffix in ('-wal','-shm','-journal'):
+            for kind in ('symlink','hardlink'):
+                sidecar=Path(str(state)+suffix)
+                if kind=='symlink':sidecar.symlink_to(self.path)
+                else:os.link(self.path,sidecar)
+                with self.assertRaises(CleanupError):Store(state)
+                self.assertEqual(self.path.read_bytes(),self.before)
+                sidecar.unlink()
+
+    def test_managed_state_links_and_insecure_journal_fail_before_authentication(self):
+        manifest=self.root/'manifest.json';manifest.write_text('{}')
+        for kind in ('symlink','hardlink','sidecar','journal'):
+            with self.subTest(kind=kind):
+                state=self.root/(kind+'.sqlite');journal=self.root/(kind+'.recovery')
+                if kind=='symlink':state.symlink_to(self.path)
+                if kind=='hardlink':os.link(self.path,state)
+                if kind=='sidecar':Path(str(state)+'-wal').symlink_to(self.path)
+                if kind=='journal':journal.symlink_to(self.root,target_is_directory=True)
+                with patch('gmail_cleanup.cli.backend') as backend,redirect_stdout(io.StringIO()):
+                    code=main(['preflight','--env-auth','--manifest',str(manifest),
+                               '--state',str(state),'--journal',str(journal),'--output',str(self.root/(kind+'.json'))])
+                self.assertEqual(code,2);backend.assert_not_called()
+                self.assertEqual(self.path.read_bytes(),self.before)
+                if kind=='hardlink':state.unlink()

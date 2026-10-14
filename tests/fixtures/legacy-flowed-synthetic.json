@@ -1,0 +1,593 @@
+{
+  "provenance": "Synthetic flowed legacy output from reviewed b21638b baseline; no live data.",
+  "manifest": {
+    "version": 1,
+    "allowlist": [
+      "abc123"
+    ],
+    "messages": {
+      "abc123": [
+        {
+          "part": "0.1",
+          "decoded_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+          "retained_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+          "drive_url": "https://drive.google.com/file/d/SYNTHETIC-offline-plain/view"
+        }
+      ]
+    }
+  },
+  "record": {
+    "message_id": "abc123",
+    "plan": {
+      "body_note_format": "retained-manifest-v1; append text/html note; UTF-8/base64 bodies",
+      "expected": {
+        "date_header_ms": 1791376496000,
+        "headers_sha256": "8b4b5ce86841f197f756459e408595c8a6d60aaba9aa6e8ecf96794ff37e88e2",
+        "inventory": [
+          {
+            "content_type": "multipart/mixed",
+            "headers_sha256": "46fdb50ca146bae8fbd06f82409db11a096465c7f7b24ab49a7c6f81aab9f412",
+            "multipart": true,
+            "part": "0"
+          },
+          {
+            "content_type": "text/plain",
+            "decoded_sha256": "65fdc9714030ee143626805e6929e7d6ba518ed84d10d82d6c8b66d50517daed",
+            "decoded_size": 304,
+            "disposition": null,
+            "filename": null,
+            "headers_sha256": "343410e57e069927bde0ab55891842f53aa58421a33ccbe7b190ea4f7652913d",
+            "multipart": false,
+            "part": "0.0"
+          }
+        ],
+        "raw_sha256": "b194816cf0f7ff4f5fce2b419d2b1537f5345820864ab1ece7d8c33948ac8352",
+        "size_bytes": 1073
+      },
+      "header_changes": [
+        {
+          "action": "add",
+          "after_value_sha256": [
+            "14efd8b5147ec1c7817514d43729c11282ac798cc2123cd38b3d74a438e230d1"
+          ],
+          "before_value_sha256": [],
+          "name": "x-gmail-attachment-cleanup",
+          "part": "0"
+        },
+        {
+          "action": "change",
+          "after_value_sha256": [
+            "371a286d5872a3730d644327581546ec3e658bbf1a3c7f7f0de2bc19905d4402"
+          ],
+          "before_value_sha256": [
+            "e318653d294617cd7cdd666002c1db21806a30541e1106f5bff7ea0ef8e06b8b"
+          ],
+          "name": "content-transfer-encoding",
+          "part": "0.0"
+        },
+        {
+          "action": "change",
+          "after_value_sha256": [
+            "8af17f83dd205cea4b38752093a35c1114fa6183ba3af0e221bc815d78dac0cb"
+          ],
+          "before_value_sha256": [
+            "dcdbbc5d8b6eb02b92133803ba582a5fe4f0e2638cc0797deff7d355a2a9ed39"
+          ],
+          "name": "content-type",
+          "part": "0.0"
+        },
+        {
+          "action": "add",
+          "after_value_sha256": [
+            "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6"
+          ],
+          "before_value_sha256": [],
+          "name": "mime-version",
+          "part": "0.0"
+        }
+      ],
+      "insert": {
+        "internalDateSource": "dateHeader",
+        "labels": [
+          "INBOX",
+          "Label_test",
+          "STARRED",
+          "UNREAD"
+        ],
+        "method": "users.messages.insert",
+        "thread_id": "thread123"
+      },
+      "message_id": "abc123",
+      "net_size_savings_bytes": -183,
+      "operation_id": "b821cbbade464c7b9fd56063589f0559",
+      "ordering_delta_ms_if_date_header_used": 0,
+      "original": {
+        "id": "abc123",
+        "internal_date_ms": 1791376496000,
+        "labels": [
+          "INBOX",
+          "Label_test",
+          "STARRED",
+          "UNREAD"
+        ],
+        "raw_sha256": "1d554b2cc41a4505a4f02b72eb9e621fb630e7d3affc1293d833e67aea7e5091",
+        "thread_id": "thread123"
+      },
+      "original_headers_sha256": "b5f956659bd06bf06e734fd62de8b3a94bb9f14a5e62216cb228070595e3a04a",
+      "original_inventory": [
+        {
+          "content_type": "multipart/mixed",
+          "headers_sha256": "e2ea989bace0f3d8cd784dda09392fded0fe2a6a6ab1a22d9fe7e0eabd3d9c39",
+          "multipart": true,
+          "part": "0"
+        },
+        {
+          "content_type": "text/plain",
+          "decoded_sha256": "848608214b0cf9534214123cc282f012abc4245695aacfdddb142f381b52885a",
+          "decoded_size": 53,
+          "disposition": null,
+          "filename": null,
+          "headers_sha256": "90d5a3e252834febb7a1578c366a5b5c705360deed0681740d3a14b9f73f7e2f",
+          "multipart": false,
+          "part": "0.0"
+        },
+        {
+          "content_type": "application/octet-stream",
+          "decoded_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+          "decoded_size": 34,
+          "disposition": "attachment",
+          "filename": "remove.bin",
+          "headers_sha256": "ac7f36b30bcc7154671499ae9eed646995d3d9d2aa3a8071272ecdb1d654df22",
+          "multipart": false,
+          "part": "0.1"
+        }
+      ],
+      "original_size_bytes": 890,
+      "plan_sha256": "534d0e5985797ab64fe666d75ced9c0e3eabe31097912660dc54a14c6e2405b6",
+      "removed": [
+        {
+          "decoded_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+          "decoded_size": 34,
+          "drive_url": "https://drive.google.com/file/d/SYNTHETIC-offline-plain/view",
+          "filename": "remove.bin",
+          "part": "0.1",
+          "retained_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b"
+        }
+      ],
+      "selections": [
+        {
+          "decoded_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+          "drive_url": "https://drive.google.com/file/d/SYNTHETIC-offline-plain/view",
+          "part": "0.1",
+          "retained_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b"
+        }
+      ],
+      "transport_headers_removed": [],
+      "version": 1
+    },
+    "replacement_id": "replacement1",
+    "state": "verified",
+    "verification": {
+      "passed": true,
+      "checks": {
+        "distinct_message_id": true,
+        "operation_marker": true,
+        "mime_contents_and_attachment_hashes": true,
+        "correspondence_and_threading_headers": true,
+        "labels_read_unread_starred_sent": true,
+        "thread_membership": true,
+        "date_header": true,
+        "internal_date_source": true,
+        "original_ordering_timestamp": true,
+        "classification_labels": true,
+        "thread_contains_original_and_replacement": true,
+        "original_unchanged": true,
+        "retained_drive_files": true
+      },
+      "differences": {
+        "expected_to_observed_header_changes": [],
+        "original_to_replacement_header_changes": [
+          {
+            "part": "0",
+            "name": "x-gmail-attachment-cleanup",
+            "before_value_sha256": [],
+            "after_value_sha256": [
+              "14efd8b5147ec1c7817514d43729c11282ac798cc2123cd38b3d74a438e230d1"
+            ],
+            "classification": "semantic",
+            "action": "add"
+          },
+          {
+            "part": "0",
+            "action": "header_sequence_change",
+            "before": [
+              [
+                "From",
+                "62540d1cd5867cbb26ef9c58c4522d8f0c102bc21d275444c012b7d6f7b7aef2"
+              ],
+              [
+                "To",
+                "499d1d4a32cb07dcc068ad5600f8b0d973f5d80a4c01b9106c0e35a5a9ae902b"
+              ],
+              [
+                "Cc",
+                "dcd9fc8f3f1f5cb5feca52dd7fd9f2f3525a0e4279be7484bce8ba66ed865a67"
+              ],
+              [
+                "Subject",
+                "20e6b0b3821f740cbe6df205de892c54db244c855a06071beb4356830fa78830"
+              ],
+              [
+                "Date",
+                "089c53238ab9c21256e3962d35d4f5be8462c3c89230d13154e91e41503048ac"
+              ],
+              [
+                "Message-ID",
+                "066b701a5aebc13daec3b6a19a8311a182e258a49311624879c5ce24cb3cf5cb"
+              ],
+              [
+                "X-Gmail-Cleanup-Test",
+                "42b66abd84a75318043f1cd4acb12728a8ad5dc4d73fe32688474cb91b981c58"
+              ],
+              [
+                "MIME-Version",
+                "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6"
+              ],
+              [
+                "Content-Type",
+                "a12a46ae04326aca2bdd064f2e3fad079c288333543a1e54a659c42950093028"
+              ]
+            ],
+            "after": [
+              [
+                "From",
+                "62540d1cd5867cbb26ef9c58c4522d8f0c102bc21d275444c012b7d6f7b7aef2"
+              ],
+              [
+                "To",
+                "499d1d4a32cb07dcc068ad5600f8b0d973f5d80a4c01b9106c0e35a5a9ae902b"
+              ],
+              [
+                "Cc",
+                "dcd9fc8f3f1f5cb5feca52dd7fd9f2f3525a0e4279be7484bce8ba66ed865a67"
+              ],
+              [
+                "Subject",
+                "20e6b0b3821f740cbe6df205de892c54db244c855a06071beb4356830fa78830"
+              ],
+              [
+                "Date",
+                "089c53238ab9c21256e3962d35d4f5be8462c3c89230d13154e91e41503048ac"
+              ],
+              [
+                "Message-ID",
+                "066b701a5aebc13daec3b6a19a8311a182e258a49311624879c5ce24cb3cf5cb"
+              ],
+              [
+                "X-Gmail-Cleanup-Test",
+                "42b66abd84a75318043f1cd4acb12728a8ad5dc4d73fe32688474cb91b981c58"
+              ],
+              [
+                "MIME-Version",
+                "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6"
+              ],
+              [
+                "Content-Type",
+                "a12a46ae04326aca2bdd064f2e3fad079c288333543a1e54a659c42950093028"
+              ],
+              [
+                "X-Gmail-Attachment-Cleanup",
+                "14efd8b5147ec1c7817514d43729c11282ac798cc2123cd38b3d74a438e230d1"
+              ]
+            ]
+          },
+          {
+            "part": "0.0",
+            "name": "content-transfer-encoding",
+            "before_value_sha256": [
+              "e318653d294617cd7cdd666002c1db21806a30541e1106f5bff7ea0ef8e06b8b"
+            ],
+            "after_value_sha256": [
+              "371a286d5872a3730d644327581546ec3e658bbf1a3c7f7f0de2bc19905d4402"
+            ],
+            "classification": "semantic",
+            "action": "change"
+          },
+          {
+            "part": "0.0",
+            "name": "content-type",
+            "before_value_sha256": [
+              "dcdbbc5d8b6eb02b92133803ba582a5fe4f0e2638cc0797deff7d355a2a9ed39"
+            ],
+            "after_value_sha256": [
+              "8af17f83dd205cea4b38752093a35c1114fa6183ba3af0e221bc815d78dac0cb"
+            ],
+            "classification": "semantic",
+            "action": "change"
+          },
+          {
+            "part": "0.0",
+            "name": "mime-version",
+            "before_value_sha256": [],
+            "after_value_sha256": [
+              "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6"
+            ],
+            "classification": "semantic",
+            "action": "add"
+          },
+          {
+            "part": "0.0",
+            "action": "header_sequence_change",
+            "before": [
+              [
+                "Content-Transfer-Encoding",
+                "e318653d294617cd7cdd666002c1db21806a30541e1106f5bff7ea0ef8e06b8b"
+              ],
+              [
+                "Content-Type",
+                "dcdbbc5d8b6eb02b92133803ba582a5fe4f0e2638cc0797deff7d355a2a9ed39"
+              ]
+            ],
+            "after": [
+              [
+                "Content-Type",
+                "8af17f83dd205cea4b38752093a35c1114fa6183ba3af0e221bc815d78dac0cb"
+              ],
+              [
+                "Content-Transfer-Encoding",
+                "371a286d5872a3730d644327581546ec3e658bbf1a3c7f7f0de2bc19905d4402"
+              ],
+              [
+                "MIME-Version",
+                "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6"
+              ]
+            ]
+          },
+          {
+            "part": "0.1",
+            "name": "content-type",
+            "before_value_sha256": [
+              "1e86d1bc52f24f75cdba3765b30e79519a49e5dc5c0d27605048b15591e07892"
+            ],
+            "after_value_sha256": [],
+            "classification": "semantic",
+            "action": "remove"
+          },
+          {
+            "part": "0.1",
+            "name": "content-transfer-encoding",
+            "before_value_sha256": [
+              "371a286d5872a3730d644327581546ec3e658bbf1a3c7f7f0de2bc19905d4402"
+            ],
+            "after_value_sha256": [],
+            "classification": "semantic",
+            "action": "remove"
+          },
+          {
+            "part": "0.1",
+            "name": "content-disposition",
+            "before_value_sha256": [
+              "145a9e89e9c8e69848e6506ec1155ff43821eab9945a297c768e54822079a875"
+            ],
+            "after_value_sha256": [],
+            "classification": "semantic",
+            "action": "remove"
+          },
+          {
+            "part": "0.1",
+            "name": "mime-version",
+            "before_value_sha256": [
+              "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6"
+            ],
+            "after_value_sha256": [],
+            "classification": "semantic",
+            "action": "remove"
+          },
+          {
+            "part": "0.1",
+            "action": "header_sequence_change",
+            "before": [
+              [
+                "Content-Type",
+                "1e86d1bc52f24f75cdba3765b30e79519a49e5dc5c0d27605048b15591e07892"
+              ],
+              [
+                "Content-Transfer-Encoding",
+                "371a286d5872a3730d644327581546ec3e658bbf1a3c7f7f0de2bc19905d4402"
+              ],
+              [
+                "Content-Disposition",
+                "145a9e89e9c8e69848e6506ec1155ff43821eab9945a297c768e54822079a875"
+              ],
+              [
+                "MIME-Version",
+                "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6"
+              ]
+            ],
+            "after": []
+          }
+        ],
+        "ordering_delta_ms": 0,
+        "raw_bytes_differ": false
+      },
+      "observed": {
+        "id": "replacement1",
+        "raw_sha256": "b194816cf0f7ff4f5fce2b419d2b1537f5345820864ab1ece7d8c33948ac8352",
+        "internal_date_ms": 1791376496000,
+        "thread_id": "thread123",
+        "labels": [
+          "INBOX",
+          "Label_test",
+          "STARRED",
+          "UNREAD"
+        ]
+      }
+    },
+    "drive_verification": [
+      {
+        "file_id": "SYNTHETIC-offline-plain",
+        "drive_url": "https://drive.google.com/file/d/SYNTHETIC-offline-plain/view",
+        "source_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+        "downloaded_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+        "name": "retained.bin",
+        "parents": [
+          "fixture-folder"
+        ],
+        "expected_size_bytes": 34,
+        "version": "1",
+        "verified": true,
+        "metadata_before": {
+          "id": "SYNTHETIC-offline-plain",
+          "name": "retained.bin",
+          "mimeType": "application/octet-stream",
+          "trashed": false,
+          "version": "1",
+          "appProperties": {
+            "purpose": "gmail-cleanup-backups-v1",
+            "source_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b"
+          },
+          "size": "34",
+          "parents": [
+            "fixture-folder"
+          ],
+          "sha256Checksum": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+          "webViewLink": "https://drive.google.com/file/d/SYNTHETIC-offline-plain/view"
+        },
+        "method": "files.get alt=media; SHA-256 of downloaded bytes",
+        "size_bytes": 34,
+        "metadata_after": {
+          "id": "SYNTHETIC-offline-plain",
+          "name": "retained.bin",
+          "mimeType": "application/octet-stream",
+          "trashed": false,
+          "version": "1",
+          "appProperties": {
+            "purpose": "gmail-cleanup-backups-v1",
+            "source_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b"
+          },
+          "size": "34",
+          "parents": [
+            "fixture-folder"
+          ],
+          "sha256Checksum": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+          "webViewLink": "https://drive.google.com/file/d/SYNTHETIC-offline-plain/view"
+        },
+        "metadata_changes": [],
+        "checks": {
+          "file_identity_name_destination_size_before": true,
+          "file_identity_name_destination_size_after": true,
+          "downloaded_sha256_matches_source": true,
+          "downloaded_size_matches_source_and_metadata": true
+        },
+        "downloads": [
+          {
+            "sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+            "size_bytes": 34
+          }
+        ],
+        "advisory_checksum_matches_download": {
+          "before": true,
+          "after": true
+        },
+        "web_view_link": "https://drive.google.com/file/d/SYNTHETIC-offline-plain/view",
+        "link_source": "Drive files.webViewLink"
+      }
+    ],
+    "drive_expectations": [
+      {
+        "file_id": "SYNTHETIC-offline-plain",
+        "drive_url": "https://drive.google.com/file/d/SYNTHETIC-offline-plain/view",
+        "source_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+        "downloaded_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+        "name": "retained.bin",
+        "parents": [
+          "fixture-folder"
+        ],
+        "expected_size_bytes": 34,
+        "version": "1",
+        "verified": true,
+        "metadata_before": {
+          "id": "SYNTHETIC-offline-plain",
+          "name": "retained.bin",
+          "mimeType": "application/octet-stream",
+          "trashed": false,
+          "version": "1",
+          "appProperties": {
+            "purpose": "gmail-cleanup-backups-v1",
+            "source_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b"
+          },
+          "size": "34",
+          "parents": [
+            "fixture-folder"
+          ],
+          "sha256Checksum": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+          "webViewLink": "https://drive.google.com/file/d/SYNTHETIC-offline-plain/view"
+        },
+        "method": "files.get alt=media; SHA-256 of downloaded bytes",
+        "size_bytes": 34,
+        "metadata_after": {
+          "id": "SYNTHETIC-offline-plain",
+          "name": "retained.bin",
+          "mimeType": "application/octet-stream",
+          "trashed": false,
+          "version": "1",
+          "appProperties": {
+            "purpose": "gmail-cleanup-backups-v1",
+            "source_sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b"
+          },
+          "size": "34",
+          "parents": [
+            "fixture-folder"
+          ],
+          "sha256Checksum": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+          "webViewLink": "https://drive.google.com/file/d/SYNTHETIC-offline-plain/view"
+        },
+        "metadata_changes": [],
+        "checks": {
+          "file_identity_name_destination_size_before": true,
+          "file_identity_name_destination_size_after": true,
+          "downloaded_sha256_matches_source": true,
+          "downloaded_size_matches_source_and_metadata": true
+        },
+        "downloads": [
+          {
+            "sha256": "b8ed21c7aa262ba685306fba8d1acadd52ce251c29fbd6d2deb867cab56d073b",
+            "size_bytes": 34
+          }
+        ],
+        "advisory_checksum_matches_download": {
+          "before": true,
+          "after": true
+        },
+        "web_view_link": "https://drive.google.com/file/d/SYNTHETIC-offline-plain/view",
+        "link_source": "Drive files.webViewLink"
+      }
+    ]
+  },
+  "messages": {
+    "abc123": {
+      "id": "abc123",
+      "raw_bytes": "RnJvbTogU3ludGhldGljIHNlbmRlciA8c2VuZGVyQGV4YW1wbGUuaW52YWxpZD4NClRvOiBTeW50aGV0aWMgcmVjaXBpZW50IDxyZWNpcGllbnRAZXhhbXBsZS5pbnZhbGlkPg0KQ2M6IFN5bnRoZXRpYyBjb3B5IDxjb3B5QGV4YW1wbGUuaW52YWxpZD4NClN1YmplY3Q6IEdNQUlMLUNMRUFOVVAtU1lOVEhFVElDIG9mZmxpbmUgcGxhaW4NCkRhdGU6IFdlZCwgMDcgT2N0IDIwMjYgMTI6MzQ6NTYgKzAwMDANCk1lc3NhZ2UtSUQ6IDxnbWFpbC1jbGVhbnVwLW9mZmxpbmUtcGxhaW5AZXhhbXBsZS5pbnZhbGlkPg0KWC1HbWFpbC1DbGVhbnVwLVRlc3Q6IG9mZmxpbmU6cGxhaW4NCk1JTUUtVmVyc2lvbjogMS4wDQpDb250ZW50LVR5cGU6IG11bHRpcGFydC9taXhlZDsgYm91bmRhcnk9ImdtYWlsLWNsZWFudXAtb2ZmbGluZS1wbGFpbi0wIg0KDQotLWdtYWlsLWNsZWFudXAtb2ZmbGluZS1wbGFpbi0wDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiA4Yml0DQpDb250ZW50LVR5cGU6IHRleHQvcGxhaW47IGNoYXJzZXQ9InV0Zi04IjsgZm9ybWF0PSJmbG93ZWQiOyBkZWxzcD0ieWVzIg0KDQpTeW50aGV0aWMgY29ycmVzcG9uZGVuY2Ugb25seS4gQ2Fmw6ksIOadseS6rCwg8J+Zgi4NCg0KLS1nbWFpbC1jbGVhbnVwLW9mZmxpbmUtcGxhaW4tMA0KQ29udGVudC1UeXBlOiBhcHBsaWNhdGlvbi9vY3RldC1zdHJlYW0NCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IGJhc2U2NA0KQ29udGVudC1EaXNwb3NpdGlvbjogYXR0YWNobWVudDsgZmlsZW5hbWU9InJlbW92ZS5iaW4iDQpNSU1FLVZlcnNpb246IDEuMA0KDQpjbVZ0YjNabElIUm9hWE1nYzNsdWRHaGxkR2xqSUdGMGRHRmphRzFsYm5RQS93PT0NCg0KLS1nbWFpbC1jbGVhbnVwLW9mZmxpbmUtcGxhaW4tMC0tDQo=",
+      "threadId": "thread123",
+      "internalDate": "1791376496000",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "STARRED",
+        "Label_test"
+      ]
+    },
+    "replacement1": {
+      "id": "replacement1",
+      "raw_bytes": "RnJvbTogU3ludGhldGljIHNlbmRlciA8c2VuZGVyQGV4YW1wbGUuaW52YWxpZD4NClRvOiBTeW50aGV0aWMgcmVjaXBpZW50IDxyZWNpcGllbnRAZXhhbXBsZS5pbnZhbGlkPg0KQ2M6IFN5bnRoZXRpYyBjb3B5IDxjb3B5QGV4YW1wbGUuaW52YWxpZD4NClN1YmplY3Q6IEdNQUlMLUNMRUFOVVAtU1lOVEhFVElDIG9mZmxpbmUgcGxhaW4NCkRhdGU6IFdlZCwgMDcgT2N0IDIwMjYgMTI6MzQ6NTYgKzAwMDANCk1lc3NhZ2UtSUQ6IDxnbWFpbC1jbGVhbnVwLW9mZmxpbmUtcGxhaW5AZXhhbXBsZS5pbnZhbGlkPg0KWC1HbWFpbC1DbGVhbnVwLVRlc3Q6IG9mZmxpbmU6cGxhaW4NCk1JTUUtVmVyc2lvbjogMS4wDQpDb250ZW50LVR5cGU6IG11bHRpcGFydC9taXhlZDsgYm91bmRhcnk9ImdtYWlsLWNsZWFudXAtb2ZmbGluZS1wbGFpbi0wIg0KWC1HbWFpbC1BdHRhY2htZW50LUNsZWFudXA6IGI4MjFjYmJhZGU0NjRjN2I5ZmQ1NjA2MzU4OWYwNTU5DQoNCi0tZ21haWwtY2xlYW51cC1vZmZsaW5lLXBsYWluLTANCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0idXRmLTgiDQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiBiYXNlNjQNCk1JTUUtVmVyc2lvbjogMS4wDQoNClUzbHVkR2hsZEdsaklHTnZjbkpsYzNCdmJtUmxibU5sSUc5dWJIa3VJRU5oWnNPcExDRG1uYkhrdXF3c0lQQ2ZtWUl1RFFvTkNnMEsNClcwRjBkR0ZqYUcxbGJuUWdZMnhsWVc1MWNEb2djbVYwWVdsdVpXUWdZMjl3YVdWek95QlRTRUV0TWpVMklISmxZMjl5WkdWa0lHSmwNCmJHOTNYUTBLVW1WdGIzWmxaQ0JoZEhSaFkyaHRaVzUwT2lCeVpXMXZkbVV1WW1sdURRcFNaWFJoYVc1bFpDQmpiM0I1T2lCb2RIUncNCmN6b3ZMMlJ5YVhabExtZHZiMmRzWlM1amIyMHZabWxzWlM5a0wxTlpUbFJJUlZSSlF5MXZabVpzYVc1bExYQnNZV2x1TDNacFpYY04NCkNsTklRUzB5TlRZNklHSTRaV1F5TVdNM1lXRXlOakppWVRZNE5UTXdObVppWVRoa01XRmpZV1JrTlRKalpUSTFNV015T1daaVpEWmsNCk1tUmxZamcyTjJOaFlqVTJaREEzTTJJTkNnPT0NCg0KLS1nbWFpbC1jbGVhbnVwLW9mZmxpbmUtcGxhaW4tMC0tDQo=",
+      "threadId": "thread123",
+      "internalDate": "1791376496000",
+      "labelIds": [
+        "INBOX",
+        "Label_test",
+        "STARRED",
+        "UNREAD"
+      ]
+    }
+  }
+}

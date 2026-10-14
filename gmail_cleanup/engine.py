@@ -51,7 +51,7 @@ def build_plan(message, selections, operation_id):
             "original_headers_sha256": header_fingerprint(parsed_original, exclude_mime=True),
             "transport_headers_removed": transport_header_changes(parsed_original),
             "header_changes": changed_headers(parsed_original, modified),
-            "body_note_format": "retained-manifest-v1; append text/html note; UTF-8/base64 bodies",
+            "body_note_format": "retained-manifest-v2; plain append/validated HTML span; UTF-8/base64 bodies",
             "insert": {"method": "users.messages.insert", "internalDateSource": "dateHeader",
                        "thread_id": original["thread_id"], "labels": original["labels"]},
             "expected": {"raw_sha256": digest(raw), "inventory": inventory(modified),

@@ -1,5 +1,6 @@
 """Independent history survives SQL-only rollback; ambiguous state never mutates."""
 from copy import deepcopy
+import base64
 import json
 import multiprocessing
 import os
@@ -13,6 +14,7 @@ from gmail_cleanup.storage import Store as RealStore
 from gmail_cleanup.errors import CleanupError
 from gmail_cleanup.mime import json_digest
 from .helpers import Store, FakeGmail, message
+from gmail_cleanup.drive import Backups
 
 
 def attempt_lock(path, queue):
@@ -136,6 +138,56 @@ class RecoveryJournalTests(unittest.TestCase):
         self.assertEqual(len(self.api.inserts),1)
         self.assertEqual(self.api.trashes,[])
 
+    def test_genesis_changed_while_open_and_nonobject_journal_block_mutations(self):
+        journal=Path(str(self.path)+'.recovery')
+        genesis=journal/'genesis.json'
+        before=genesis.read_bytes()
+        row=json.loads(before);row['mailbox_key']='other'
+        genesis.write_text(json.dumps(row))
+        with self.assertRaises(CleanupError):create(self.api,self.store,self.manifest,'abc123',execute=True)
+        genesis.write_bytes(before)
+        entry=journal/'000000000001.json';before_entry=entry.read_bytes()
+        for payload in ('[]','null','{"sequence":1}'):
+            entry.write_text(payload)
+            with self.assertRaises(CleanupError):create(self.api,self.store,self.manifest,'abc123',execute=True)
+        entry.write_bytes(before_entry)
+        self.assertEqual(self.api.inserts+self.api.trashes,[])
+
+    def test_restored_drive_state_keeps_allocated_id_and_upload_uncertainty(self):
+        snapshot=self.snapshot()
+        key='fixture-folder:backup'
+        self.store.context={'original_id':'abc123','operation_id':self.record['plan']['operation_id'],
+                            'plan_sha256':self.record['plan']['plan_sha256']}
+        backups=Backups(self.api.drive,self.store)
+        file_id=backups._create_once(key,'file.bin','fixture-folder',b'bytes',True)
+        allocated=list(self.api.drive.allocated);creates=list(self.api.drive.creates)
+        self.restore(snapshot)
+        with self.assertRaises(CleanupError):Backups(self.api.drive,self.store)._create_once(key,'file.bin','fixture-folder',b'bytes',True)
+        self.store.restore_from_journal()
+        self.assertEqual(self.store.get_backup(key)['file_id'],file_id)
+        self.assertEqual(Backups(self.api.drive,self.store)._create_once(key,'file.bin','fixture-folder',b'bytes',True),file_id)
+        self.assertEqual(self.api.drive.allocated,allocated)
+        self.assertEqual(self.api.drive.creates,creates)
+        # Removal/temporarily missing read cannot authorize another implicit create.
+        self.api.drive.files.pop(file_id)
+        with self.assertRaises(CleanupError):Backups(self.api.drive,self.store)._create_once(key,'file.bin','fixture-folder',b'bytes',True)
+        self.assertEqual(self.api.drive.creates,creates)
+
+    def test_verified_snapshot_restore_after_trash_recovers_read_only_with_same_approval(self):
+        record=create(self.api,self.store,self.manifest,'abc123',execute=True)
+        snapshot=self.snapshot()
+        approval={'action':'trash-original','plan_sha256':record['plan']['plan_sha256'],'replacement_id':record['replacement_id']}
+        trash_original(self.api,self.store,self.manifest,'abc123',execute=True,enable_trash=True,
+            approve_plan=approval['plan_sha256'],approve_replacement=approval['replacement_id'])
+        self.restore(snapshot)
+        with self.assertRaises(CleanupError):trash_original(self.api,self.store,self.manifest,'abc123',execute=True,enable_trash=True,
+            approve_plan=approval['plan_sha256'],approve_replacement=approval['replacement_id'])
+        self.store.restore_from_journal()
+        self.assertEqual(self.store.get('abc123')['approval'],approval)
+        trash_original(self.api,self.store,self.manifest,'abc123',execute=True,enable_trash=True,
+            approve_plan=approval['plan_sha256'],approve_replacement=approval['replacement_id'])
+        self.assertEqual(self.api.trashes,['abc123'])
+
     def test_legacy_inspection_and_candidate_recording_never_grant_trash(self):
         record=create(self.api,self.store,self.manifest,'abc123',execute=True)
         self.store.close()
@@ -156,3 +208,28 @@ class RecoveryJournalTests(unittest.TestCase):
             trash_original(self.api,self.store,self.manifest,'abc123',execute=True,enable_trash=True,
                 approve_plan=legacy['plan']['plan_sha256'],approve_replacement='replacement1')
         self.assertEqual(self.api.trashes,[])
+
+    def test_unsafe_legacy_flowed_replacement_is_inspectable_without_new_eligibility(self):
+        fixture=json.loads((Path(__file__).parent/'fixtures/legacy-flowed-synthetic.json').read_text())
+        messages={key:{**value,'raw_bytes':base64.b64decode(value['raw_bytes'])}
+                  for key,value in fixture['messages'].items()}
+        self.api=FakeGmail(messages)
+        self.manifest=fixture['manifest']
+        legacy=fixture['record']
+        self.store.close()
+        con=sqlite3.connect(self.path)
+        con.execute('UPDATE operations SET record=? WHERE message_id=?',(json.dumps(legacy),'abc123'))
+        con.commit();con.close()
+        self.store=RealStore(self.path)
+        before=deepcopy(self.store.get('abc123'))
+        observed=reconcile(self.api,self.store,self.manifest,'abc123',legacy['replacement_id'],execute=True)
+        self.assertTrue(observed['verification']['passed'])  # Historical bytes really match.
+        self.assertFalse(observed['verification']['current_policy_eligible'])
+        self.assertEqual(observed['state'],'recovery_only')
+        self.assertEqual(self.store.get('abc123'),before)
+        inspected=create(self.api,self.store,self.manifest,'abc123',execute=True)
+        self.assertEqual(inspected['state'],'recovery_only')
+        self.assertFalse(inspected['verification']['current_policy_eligible'])
+        with self.assertRaises(CleanupError):trash_original(self.api,self.store,self.manifest,'abc123',execute=True,enable_trash=True,
+            approve_plan=legacy['plan']['plan_sha256'],approve_replacement=legacy['replacement_id'])
+        self.assertEqual(self.api.inserts+self.api.trashes,[])
