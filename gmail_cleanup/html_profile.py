@@ -1,5 +1,7 @@
 """Deliberately small HTML profile: validation, never general repair/serialization."""
 from html.parser import HTMLParser
+from copy import deepcopy
+import re
 from urllib.parse import urlsplit
 import html5lib
 
@@ -16,6 +18,9 @@ class SourceProfile(HTMLParser):
     def __init__(self, source):
         super().__init__(convert_charrefs=False)
         self.source = source
+        # HTMLParser.getpos() advances lines ONLY for LF, not str.splitlines'
+        # wider Unicode/control separator set. Columns count Python characters.
+        self.line_starts = [0] + [i + 1 for i, char in enumerate(source) if char == '\n']
         self.stack = []
         self.body_end = None
         self.complete = False
@@ -61,7 +66,14 @@ class SourceProfile(HTMLParser):
             self.fail('unusual/ambiguous nesting or implied closures')
         if tag == 'body':
             line, column = self.getpos()
-            self.body_end = sum(len(x) for x in self.source.splitlines(keepends=True)[:line - 1]) + column
+            if not 1 <= line <= len(self.line_starts):
+                self.fail('closing-body coordinate is outside source')
+            offset = self.line_starts[line - 1] + column
+            end = self.source.find('>', offset)
+            token = self.source[offset:end + 1] if end >= offset else ''
+            if not re.fullmatch(r'</body[ \t\r\n\f]*>', token, re.IGNORECASE):
+                self.fail('closing-body coordinate does not identify its token')
+            self.body_end = offset
         self.stack.pop()
 
     def handle_decl(self, declaration):
@@ -99,23 +111,47 @@ def compose(source, note):
     span = '\r\n' + note + '\r\n'
     result = source[:offset] + span + source[offset:]
     insertion_offset(result)
-    # Inspect the standards-parsed tree, not merely source substring presence.
-    # The complete note subtree must appear as one new top-level body/fragment
-    # child with its exact text and decoded anchor attributes intact.
+    verify_parsed_preservation(source, result, note, complete=offset != len(source))
+    return result, offset, span
+
+
+def verify_parsed_preservation(source, result, note, *, complete):
+    """Remove only the exact intended note/whitespace; compare full HTML5 trees.
+
+    Keep all original text, comments, attributes, children AND element tails.
+    HTML5 preprocessing folds inserted CRLF to LF. Do not strip any other text.
+    Text after a closing body may be relocated into body by the HTML5 parser;
+    reconnect that surviving tail rather than drop or reorder it.
+    """
     parser = html5lib.HTMLParser(namespaceHTMLElements=False)
     fragment = parser.parseFragment(note)
-    expected_div = next(child for child in fragment if child.tag == 'div')
+    if fragment.text or [child.tag for child in fragment] != ['hr', 'div']:
+        raise Unsupported('HTML cleanup note has an unexpected structure')
     def signature(node):
-        return (node.tag, tuple(sorted(node.attrib.items())), node.text,
-                tuple((signature(child), child.tail) for child in node))
-    expected = signature(expected_div)
-    complete = offset != len(source)
+        # None and empty text both represent no characters; whitespace is exact.
+        return (node.tag, tuple(sorted(node.attrib.items())), node.text or '',
+                node.tail or '', tuple(signature(child) for child in node))
     before = parser.parse(source) if complete else parser.parseFragment(source)
     after = parser.parse(result) if complete else parser.parseFragment(result)
     before_root = before.find('body') if complete else before
     after_root = after.find('body') if complete else after
-    old_count = sum(child.tag == 'div' and signature(child) == expected for child in before_root)
-    new_count = sum(child.tag == 'div' and signature(child) == expected for child in after_root)
-    if new_count != old_count + 1:
+    if before_root is None or after_root is None or len(after_root) != len(before_root) + len(fragment):
         raise Unsupported('HTML note/anchors are not exact usable top-level content')
-    return result, offset, span
+    inserted = list(after_root)[len(before_root):]
+    for index, (expected, observed) in enumerate(zip(fragment, inserted)):
+        reference = deepcopy(observed)
+        if index == len(inserted) - 1:
+            reference.tail = expected.tail  # Handle the suffix separately below.
+        if signature(reference) != signature(expected):
+            raise Unsupported('HTML note/anchors are not exact usable top-level content')
+    slot = after_root if not len(before_root) else after_root[len(before_root) - 1]
+    attribute = 'text' if not len(before_root) else 'tail'
+    prior = getattr(slot, attribute) or ''
+    following = inserted[-1].tail or ''
+    if not prior.endswith('\n') or not following.startswith('\n'):
+        raise Unsupported('HTML note whitespace is not at the approved boundary')
+    setattr(slot, attribute, prior[:-1] + following[1:] or None)
+    for child in inserted:
+        after_root.remove(child)
+    if signature(before) != signature(after):
+        raise Unsupported('HTML insertion changes original interpreted content')

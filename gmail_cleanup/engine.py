@@ -10,8 +10,8 @@ from .mime import (MARKER, date_ms, digest, header_fingerprint, inventory, json_
                    parse, transform, transport_header_changes, changed_headers,
                    semantic_root, all_header_differences)
 
-SAFETY_POLICY = 2
-TRANSFORMATION_POLICY = 2
+SAFETY_POLICY = 3
+TRANSFORMATION_POLICY = 3
 
 
 def current_policy(plan):
