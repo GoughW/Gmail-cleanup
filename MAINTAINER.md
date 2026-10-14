@@ -1,353 +1,232 @@
 # Maintainer and operator handoff — read this first
 
-This is a small synchronous Python CLI for removing **explicitly selected Gmail
-attachments after retaining and verifying their exact bytes on Drive**. Gmail
-cannot edit attachments in place: we reconstruct and insert a replacement with a
-new Gmail ID, verify it, then separately approve moving the original to Trash.
-The correspondence, labels, dates and thread must survive the planned transformation.
-Nothing is sent. No search result becomes an automatic cleanup allowlist.
+Purpose: remove explicitly selected Gmail attachments only after retaining their
+exact decoded bytes on Drive. Gmail cannot edit attachments in place, so the tool
+imports a replacement, verifies it, then separately approves original-message
+Trash. A new Gmail ID is unavoidable. Nothing is sent and no thread-wide write is
+exposed. This revision implements reviewer findings F1–F8 from baseline
+`b21638b71f6f100abfeb1d3ad40bc041a340e8af`; **independent re-review is required before
+any live pilot**. Historical disposable-account success does not validate the new
+policies. No live account/OAuth access occurred during remediation.
 
-Five dummy messages completed this flow in a disposable account; API checks passed
-and the user confirmed correct Gmail UI rendering. That evidence is limited to the
-tested cases. **Credentials and an earlier test are not authorization to access or
-change a real mailbox.** Default to offline work until the current task authorizes
-specific live access. The completed disposable test must not be restarted as a new
-operation. Read [REPORT.md](REPORT.md) for evidence and remaining limitations.
+Read this first, [README.md](README.md) for commands,
+[docs/GOOGLE_SETUP.md](docs/GOOGLE_SETUP.md) for consent/hosts,
+[docs/RECOVERY.md](docs/RECOVERY.md) for recovery, and [REPORT.md](REPORT.md) for
+before/after evidence, full test results and unresolved validation.
 
-## Runtime architecture and repository map
+## Architecture and repository map
 
-Python 3.11+, one local process, standard-library MIME parsing and private SQLite
-state. No server, database service, worker, scheduler, GUI or connector is involved.
-`gmail-cleanup` enters `cli.main`; `gmail-cleanup-synthetic` enters `synthetic.main`.
-Core/offline code uses the standard library. Optional `.[gmail]` dependencies provide
-Google's API client, OAuth desktop consent and proxy transport support.
+Linux/Python 3.12, one synchronous CLI/operator, standard-library MIME parser,
+html5lib validation, private SQLite with synchronous=FULL, an independent write-once
+hash-chained journal, and the exactly locked Google SDK/auth/HTTP stack. No web
+service, worker, GUI, scheduler or connector. SDK discovery is static; messages
+and upload payloads are in memory. Ordinary logs never contain raw correspondence
+or credentials. Audits contain sensitive IDs, filenames, header values and hashes.
 
-```mermaid
-flowchart LR
-    CLI[CLI and explicit manifest] --> Engine[Plan and operation lifecycle]
-    Engine <--> State[Private SQLite audit]
-    Engine --> MIME[Standard Python MIME parser]
-    Engine --> Gmail[Gmail API client]
-    Engine --> Drive[Drive backup and verification]
-    Gmail --> Google[Google APIs through trusted HTTPS proxy]
-    Drive --> Google
-```
-
-| File | What to inspect there |
+| File | Role / next place to inspect |
 | --- | --- |
-| [README.md](README.md) | Detailed operator commands, note format, supported MIME and retention. |
-| [docs/GOOGLE_SETUP.md](docs/GOOGLE_SETUP.md) | User-owned project, Desktop OAuth, secure bindings, hosts and publication. |
-| [REPORT.md](REPORT.md) | Verified live/offline behavior versus untested cases. |
-| [pyproject.toml](pyproject.toml) | Python/dependency requirements and CLI entry points. |
-| [gmail_cleanup/cli.py](gmail_cleanup/cli.py) | Commands, dry-run defaults, authentication choice and approval flags. |
-| [gmail_cleanup/manifest.py](gmail_cleanup/manifest.py) | Exact ID allowlists and original MIME-part/hash selections. |
-| [gmail_cleanup/api.py](gmail_cleanup/api.py) | OAuth refresh, raw Gmail fetch, insert, thread read, exact-message Trash; no automatic write retries. |
-| [gmail_cleanup/mime.py](gmail_cleanup/mime.py) | MIME validation/transformation, hashes, notes, transport allowlists and header auditing. |
-| [gmail_cleanup/drive.py](gmail_cleanup/drive.py) | Backup lookup/deduplication, persisted upload IDs, metadata and downloaded-byte verification. |
-| [tests/test_drive_links.py](tests/test_drive_links.py) | Canonical webViewLink propagation, exact HTML href/escaping and immutable legacy-link recovery. |
-| [gmail_cleanup/preflight.py](gmail_cleanup/preflight.py) | Validate source, retain attachments, reconstruct locally, emit resolved selections/plans; no Gmail writes. |
-| [gmail_cleanup/engine.py](gmail_cleanup/engine.py) | Immutable plan checks, create/verify/reconcile/Trash lifecycle and post-Trash recovery. |
-| [gmail_cleanup/storage.py](gmail_cleanup/storage.py) | Private file writes, SQLite operations/backups and durable event history. |
-| [gmail_cleanup/workflow.py](gmail_cleanup/workflow.py) | Sequential full-flow runner reserved for disposable accounts; stop at first failure. |
-| [gmail_cleanup/fixtures.py](gmail_cleanup/fixtures.py), [synthetic.py](gmail_cleanup/synthetic.py) | Eleven offline fixtures and a registered synthetic live harness that creates replacements only. |
-| [tests/helpers.py](tests/helpers.py) | In-memory Gmail/Drive fakes, including interrupted writes and corrupt responses. |
-| [examples/](examples/) | Fictional version-1/version-2 selection examples; replace placeholders after inspection. |
-| [.github/workflows/offline.yml](.github/workflows/offline.yml) | Credential-free CI tests. |
+| `cli.py`, `synthetic.py`, `workflow.py` | CLI defaults, explicit allowlists, synthetic guards, sequential stop-on-failure orchestration. |
+| `manifest.py` | Version-1 retained selections; version-2 backup selections; exact IDs, part paths and decoded hashes. |
+| `paths.py` | Pre-authentication alias policy, pinned directory/leaf descriptors, protected input/output/state/journal paths. |
+| `storage.py`, `recovery.py` | Atomic artifacts, lifecycle flock, SQLite/journal comparison, durable intents, local restoration and non-authoritative legacy inspection notes. |
+| `api.py`, `transport.py`, `requirements.lock` | OAuth/direct API adapters and exact reviewed single-submission transport. |
+| `mime.py`, `html_profile.py` | Supported MIME/body profile, protected resources, source-preserving notes, inventories and narrow transport exceptions. |
+| `drive.py`, `preflight.py` | Preallocated uploads/deduplication, two bounded coherent complete downloads, canonical links and locally reconstructed plans. |
+| `engine.py` | Policy version 2, immutable approval/bytes, exact create/verify/reconcile/Trash and post-Trash gates. |
+| `fixtures.py`, `examples/` | Fictional inputs; synthetic cases and selection formats. |
+| `tests/helpers.py`, `process_helpers.py` | Observable fake accounts; independent file-backed remote state for process-kill tests. |
+| `tests/test_mime_policy.py`, `test_drive_stability.py` | Independent correspondence/HTML rendering and content-stability regressions. |
+| `tests/test_artifact_safety.py`, `test_recovery_journal.py`, `test_process_interruptions.py` | Aliases, syscall failures, concurrent operators, stale restores, unsafe legacy fixtures and SIGKILL drills. |
+| `tests/test_transport_faults.py` | Actual locked SDK + local fault/TLS/proxy servers, never real Google endpoints. |
+| `tests/baseline_reproductions.py` | Defect evidence run against an archived reviewed baseline only, not an acceptance test. |
+| `tests/run_offline.py`, `tests/network_guard/`, `.github/workflows/offline.yml` | Required complete lock-validated, loopback-only gate and CI. |
 
-The engine is the safety boundary. Do not add a direct Gmail write to a script that
-bypasses its checks/state transitions. API services use static SDK discovery rather
-than fetching discovery documents at runtime. Environment OAuth is refreshed in
-memory; clients use the inherited HTTPS proxy and CA trust. Raw messages/payloads
-are held in memory, not logged. `--offline-sources` uses a read-only local mailbox
-adapter, not a write simulation. Full write simulation uses the in-memory test fakes.
+Paths in the map are relative to `gmail_cleanup/` unless under `tests/` or explicitly
+at repository root. Keep execution inside the engine; do not bypass lifecycle
+checks by making a direct API write in a new helper.
 
-## Credentials and exact runtime requirements
+## Required runtime configuration
 
-Enable Gmail API and Drive API in a user-owned Google Cloud project. Desktop OAuth
-consent occurs on the user's computer. Production needs exactly:
+Only these production OAuth scopes:
 
 ```text
 https://www.googleapis.com/auth/gmail.modify
 https://www.googleapis.com/auth/drive.file
 ```
 
-`gmail.modify` covers read/insert/verify/Trash. `drive.file` covers app-created or
-explicitly app-authorized files; it does not expose the whole Drive archive. Never
-extract connector credentials or broaden scopes to bypass a failed check.
+Only these cloud API hosts: `oauth2.googleapis.com` for refresh,
+`gmail.googleapis.com` for Gmail, `www.googleapis.com` for Drive. The browser's
+`drive.google.com` viewer and local `accounts.google.com` consent are separate.
+Use a user-owned Desktop OAuth project. Credentials imply capabilities, not task
+permission. Never extract connector credentials or broaden scopes to bypass a stop.
 
-| Environment binding | Role |
+| Variable / setting | Purpose (no secret values belong here) |
 | --- | --- |
-| `GMAIL_CLIENT_ID` | Public Desktop OAuth client identifier; must match the client issuing the token. |
-| `GMAIL_CLIENT_SECRET` | Secure Desktop client secret; routed only to the OAuth token host. |
-| `GMAIL_REFRESH_TOKEN` | Secure refresh grant for the deliberately selected account; routed only to the token host. |
-| `GMAIL_OAUTH_SCOPE` | Space-separated exact two scope URLs above; metadata does not extend Google's grant. |
+| `GMAIL_CLIENT_ID` | Desktop application's OAuth client ID. |
+| `GMAIL_CLIENT_SECRET` | Matching client secret, securely routed only to the OAuth host. |
+| `GMAIL_REFRESH_TOKEN` | Account-specific two-scope grant, securely routed only to the OAuth host. |
+| `GMAIL_OAUTH_SCOPE` | Exact space-separated two scope URLs above; setting it does not extend the grant. |
+| `HTTPS_PROXY` / inherited proxy settings | Upstream httplib2 connection/proxy routing; preserve environment policy. |
+| `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` | Supported trusted CA bundle fallbacks; TLS verification remains enabled. |
+| CLI `--state`, `--journal` | Mailbox-specific SQLite and independently retained recovery directory. |
+| CLI `--mailbox-key` | Expected profile-address SHA-256 (strip + casefold + UTF-8); required for new state and checked against authenticated Gmail. |
 
-`--env-auth` uses these bindings; `--token PATH` alternatively reads an explicitly
-supplied private user-owned OAuth token file. Never print secrets, dump environment
-values, log HTTP bodies, enable shell tracing or write proxy placeholders into a
-token file. The environment currently configured by an operator must be checked,
-not assumed to identify the desired mailbox.
+File-token OAuth is also supported via `--token`; never combine identity/state from
+different accounts. Runtime versions must match the reviewed transport lock.
+Install **all** `requirements.lock` entries then the project with `--no-deps
+--no-build-isolation`; resolving `.[gmail]` alone is not a reproducible installation.
 
-| Required cloud API host | Calls |
-| --- | --- |
-| `oauth2.googleapis.com` | Refresh exchange; sole secret-injection destination. |
-| `gmail.googleapis.com` | Raw message/thread reads, insert and Trash. |
-| `www.googleapis.com` | Drive metadata, ID generation, upload and binary download. |
+## Exact production sequence and invariants
 
-Local browser consent additionally uses `accounts.google.com`; dependency installs
-use `pypi.org`/`files.pythonhosted.org` and existing development presets. Those are
-separate from runtime API requirements. Preserve proxy routing and TLS verification.
-Draft saving and publication differ: use the environment UI's Publish action after
-settings changes. Runtime clients/connections must be initialized in each new task.
+1. Inspect only explicitly allowlisted original IDs. Fetch raw MIME plus Gmail
+   labels/thread/internalDate. Require response ID equals requested ID. Select by
+   original MIME path + independently decoded SHA-256, not filename.
+2. Validate all selected source bytes and the MIME/body profile before allocation
+   or upload. Save a provisional selection/operation digest for backup intents.
+3. Locate a tagged intended binary Drive counterpart or explicitly enable a new
+   backup. Journal allocation intent; persist the pre-generated Drive ID; journal
+   upload intent before create. Inspect that exact ID after any uncertain outcome.
+4. Verify identity/name/parent/size/non-trashed/binary state before and after a
+   **complete independent download**. Require source SHA-256 and stable valid
+   positive version within the accepted bracket. Discard a changed attempt and
+   begin a fresh complete one, at most twice. Missing checksum is okay; contradictory
+   populated SHA-256 is not. Version regression/missing version is a blocker.
+5. Save the exact final plan: source snapshot, selected hashes/URLs, inventories,
+   header fingerprints, expected reconstructed-byte hash, labels/thread/dates and
+   policy versions. Plans and existing approvals are immutable. Regenerated bytes
+   must match the approved hash, never silently substitute a new transformation.
+6. Recheck source and Drive, journal exact account/original/operation/plan insert
+   intent, persist `insert_pending`, then call `users.messages.insert` with
+   `internalDateSource=dateHeader`. No sending. Persist a distinct replacement ID.
+7. Fetch and strictly verify replacement, original, current Drive proof and thread
+   membership. Failed verification leaves the original unchanged and records any
+   created replacement. Known-ID retries reverify it, never insert another copy.
+8. Require current policies, intact matching journal/database, authenticated account,
+   exact original and replacement identities, successful fresh checks, and separate
+   `--execute --enable-trash --approve-plan HASH --approve-replacement ID` approval.
+   Journal that approval-bound intent and persist `trash_pending` **before** calling
+   `users.messages.trash` on the exact original ID.
+9. Verify the original still exists in Trash with intact bytes/date/thread, plus
+   replacement and Drive preservation. Post-write uncertainty/failure stops the
+   workflow; it cannot reverse a remote write.
 
-## End-to-end sequence and data contracts
+Metadata/content that stay exact: From/To/Cc/Subject and all other non-exempt root
+headers, Message-ID/In-Reply-To/References, Date/internalDate, requested labels
+including UNREAD/STARRED/SENT, thread ID/membership, operation marker, approved
+plain/HTML note-bearing content, selected removal, and every remaining MIME
+resource's decoded bytes/headers. Original decoded plain correspondence is an
+exact prefix; original HTML source is exact outside the validated insertion span.
+Charset/transfer encoding becomes UTF-8/base64 with audited metadata changes;
+Content-Language is retained. Original Date versus internalDate can differ; any
+ordering delta blocks eligibility. Duplicate Message-ID/thread import behavior is
+verified, never repaired by changing headers.
 
-1. **Gmail inspection:** fetch an explicitly allowlisted original's raw MIME and
-   ID/thread/labels/internalDate. Inspect its original MIME paths and decoded hashes.
-2. **Drive retention:** locate an intended app-accessible counterpart or upload one
-   only when enabled. Validate MIME/source selection before uploading.
-3. **Drive verification:** hash the complete downloaded bytes and check intended
-   file ID, pinned name/parent destination, expected size and binary/non-trashed state.
-4. **Reconstruction and plan:** remove only selected attachment leaves; preserve
-   unselected resources and original decoded correspondence; append a readable note
-   with filename, Drive's verified canonical `webViewLink` and matching SHA-256. Persist exact expected
-   inventories, headers, hashes, metadata and plan digest.
-5. **Insertion:** recheck source and Drive, regenerate approved bytes and persist
-   `insert_pending` before `users.messages.insert`, using the original thread/labels
-   and `internalDateSource=dateHeader`. Record the new replacement ID.
-6. **Gmail verification:** fetch the actual replacement, compare semantic MIME,
-   headers, labels, dates and thread membership, and freshly verify source/Drive.
-7. **Trash:** after separate exact approval and another fresh verification, persist
-   `trash_pending` then call `users.messages.trash` on the original only. Reverify
-   original-in-Trash, replacement, thread and retained Drive files afterward.
+## Conservative MIME/HTML and cleanup note
 
-A version-2 backup manifest contains exactly its explicit ID allowlist and selected
-`part`/`decoded_sha256` values, optionally `drive_file_id`. A successful preflight
-resolves it to version 1, adding `retained_sha256` and `drive_url`. MIME paths address
-the **original raw tree**, not filenames, Gmail attachment IDs or replacement paths.
-All attachment hashes must agree. Read-only inspection accepts empty version-1
-selection lists. See [manifest.py](gmail_cleanup/manifest.py) and [examples](examples/).
+Body Content-Type accepts only a recognized nonempty charset parameter. Reject
+flowed/delsp, all other parameters, duplicates, parser defects, unsupported/lossy
+charsets, ambiguous MIME, attached emails, signed/encrypted messages. Reject
+selected inline resources and **all** selected Content-ID/Content-Location parts,
+regardless of disposition or apparent reference absence. This intentionally blocks
+many normal Gmail attachments with IDs. Unselected resources remain exact.
 
-Keep one private database per mailbox and one operator at a time. Do not combine
-real-mailbox state with disposable fixtures. SQLite records original/replacement
-IDs, operation marker, immutable plan, verification results, upload IDs and state,
-plus append-only event history. Audit subjects, IDs, filenames, links, Date/reply
-headers and hashes are sensitive even without bodies/tokens. Store all manifests,
-raw fixtures, tokens and audits in ignored `.private/` or outside the repository.
-Back up the database securely; losing it loses the recovery record.
+HTML profile accepts balanced `html/head/body`, `p/div/span`, `br/hr`, `ul/ol/li`,
+`b/strong/i/em/u`, `blockquote/pre/code`, `a/img`. Attributes are tightly allowlisted:
+link href/title, CID-only images with alt/positive dimensions, limited lang. No
+CSS/style/class/id/hidden, scripts/raw-text, external images, implicit closing/repair,
+unknown elements, malformed comments or ambiguous document structure. HTML5 parsing
+must agree with a safe top-level insertion boundary. Source is not repaired or
+reserialized. The composed note must parse as the exact new body/fragment subtree;
+an independent offline PDF renderer tests visible filename/hash and exact link.
+This is bounded HTML support, not arbitrary-email rendering support.
 
-## Safety gates: what must remain exact
+Plain note, once per selected attachment:
 
-Before the first Trash request, all of these must hold:
+```text
+[Attachment cleanup: retained copies; SHA-256 recorded below]
+Removed attachment: <original filename>
+Retained copy: <verified canonical Drive webViewLink>
+SHA-256: <matching decoded source / independently downloaded Drive SHA-256>
+```
 
-- The manifest explicitly selects this original ID/part/hash; the saved plan digest
-  and regenerated approved bytes match. Signed/encrypted, attached-email and
-  ambiguous MIME are rejected rather than guessed at.
-- The original's exact raw hash, ID, thread, labels and internalDate still match its
-  planning snapshot. Draft, Spam, Trash and unsupported classification state are
-  excluded from new plans. Concurrent user edits stop the operation.
-- Retained Drive identity, pinned filename/destination, size, binary/non-trashed
-  state and complete downloaded SHA-256 pass fresh verification against source.
-- The replacement has a distinct recorded Gmail ID and exact operation marker.
-  From/To/Cc/Subject, Message-ID/In-Reply-To/References where present, and every other
-  non-transport root header match the approved reconstruction.
-- Original decoded text/HTML plus the approved note, MIME structure, every nested
-  MIME header and every unselected/inline resource hash remain exact; selected
-  attachments are absent. UTF-8/base64 body normalization is intentional and planned.
-- Replacement labels (including read/unread, starred and sent state), Date and
-  internalDate match expectations and original ordering. Its thread ID is the
-  original's and the fetched thread contains both original and replacement.
-- Verification state is `verified`; execution uses modify-capable authentication,
-  `--execute --enable-trash`, the exact approved plan SHA-256 and replacement ID.
+HTML uses a separator and escaped list, before closing body or at fragment end.
+Store Drive's canonical `files.webViewLink` including resourcekey/query parameters;
+reject missing/unsafe/wrong-file links. Parsed href must equal that URL; semicolon
+and hash follow `</a>`, outside the href. Immutable historical manual links are not
+silently rewritten. Backups remain private; a browser must be signed into an
+owning/authorized account. Never change sharing to repair a browser sign-in issue.
 
-A verification failure leaves the pre-Trash original untouched and reports any
-created replacement. Never rewrite semantic headers, override failed gates, or
-claim a missing original proves success. Post-Trash verification checks the original
-still exists with intact bytes/thread/internalDate and a TRASH label; original label
-changes caused by Trash are audited separately from unchanged replacement labels.
-
-### Drive deduplication and metadata settling
-
-Default retention uses an app-created **Gmail attachment backups** folder. An
-explicit accessible folder can be passed with `--drive-folder-id`. Lookup uses the
-purpose tag `gmail-cleanup-backups-v1`, folder and source decoded SHA-256. Equal-byte
-attachments can share a retained file even if filenames differ; the selected
-counterpart's own name/destination is pinned. Multiple matching files/folders are
-ambiguous and need explicit IDs. A corrupt tagged copy blocks the operation instead
-of silently creating another backup. An explicit `drive_file_id` selects an intended
-binary counterpart; its accessible metadata and actual bytes still must verify.
-
-Version counters, timestamps, asynchronously populated checksums and detected
-binary MIME types may settle after upload. These changes are audited, not required
-to remain immutable. If metadata changes during a valid download, a bounded fresh
-complete download/hash check guards against a same-size byte change. Renames,
-destination/identity/size mismatches, missing/trashed/native files and wrong hashes
-block. Drive-provided checksums and app tags never replace independent content
-hashing. The tool never changes existing Drive file content, location or sharing.
-
-New automatic selections copy `files.webViewLink` verbatim from the latest verified
-Drive metadata, including query/resource-key parameters. Missing, unsafe or
-wrong-file viewer URLs block resolution rather than causing a guessed URL fallback.
-Supported HTTPS Drive viewer forms include `/file/d/ID/view` and `/open?id=ID`.
-The exact URL is persisted in backup proof, manifest and note. HTML escapes query
-ampersands once; parsed `href` must equal the canonical URL and end before the
-semicolon preceding `SHA-256`. Existing approved/manual URLs are not silently
-rewritten during recovery; current canonical links are separately audited.
-Browser access needs the owning/authorized Google account. Never make the file
-public to fix a wrong-session or sign-in problem. See [link regressions](tests/test_drive_links.py).
-
-### Intentional header differences
-
-Changing MIME/body bytes invalidates delivery signatures. Reconstruction removes
-root DKIM-Signature, DomainKey-Signature, X-Google-DKIM-Signature, ARC-Seal,
+Root transport/authentication assertions invalidated by reconstruction are removed:
+DKIM-Signature, DomainKey-Signature, X-Google-DKIM-Signature, ARC-Seal,
 ARC-Message-Signature, ARC-Authentication-Results, Authentication-Results,
-Received-SPF and X-Google-Original-Authentication-Results. Original Received trace
-remains in reconstructed bytes. Post-insert verification tolerates differences in
-only that root transport/authentication allowlist plus Received, because Gmail may
-add delivery metadata during insert. The exact approved raw hash/inventory/header
-fingerprints are validated before applying this exception. It does not apply to
-nested MIME headers, correspondence/threading headers, body bytes or attachments.
+Received-SPF, X-Google-Original-Authentication-Results. Received traces are retained
+in reconstructed bytes. Post-insert comparison tolerates only these root headers
+and Received differences/additions, after validating the approved reference first.
+Audit **all** header differences, including sequence/casing and value hashes. No
+nested MIME-header exception; no semantic/threading exception. The replacement
+cannot retain the original message's DKIM/ARC authenticity.
 
-All source-to-replacement and expected-to-observed header differences are audited
-by MIME path/name/value hashes, including header order/casing. Root marker and
-planned body charset/encoding edits are intentional; unexpected semantic edits
-remain fatal. Inspect [mime.py](gmail_cleanup/mime.py), [engine.py](gmail_cleanup/engine.py)
-and [test_server_headers.py](tests/test_server_headers.py) before changing policy.
+## Deduplication, retries and durable local evidence
 
-## Offline checks, demonstration and live pilot
+App-tagged files deduplicate by destination folder + decoded content hash; identical
+attachments may reuse one retained file under its pinned existing name. Multiple
+counterparts/folders require explicit IDs. A corrupt tagged file blocks rather
+than prompting an automatic duplicate. Native Google documents are not byte-exact
+binary counterparts. `drive.file` can see only app-created/authorized files.
 
-From the checkout, install/test as described in [README](README.md#install-credentials-and-network).
-The full offline suite needs no OAuth/network access:
+One operator and one authoritative store per mailbox. A flock covers the entire
+store lifecycle; different databases/machines are not globally coordinated. Local
+paths are checked before auth: input inventories/raw sources/tokens, reports,
+SQL/journal sidecars and independent records cannot alias. Compare canonical paths
+and existing inode identity; final writable links/hardlinks are refused. Directory
+and leaf descriptors are pinned/rechecked. Use private trusted directories, not
+shared or attacker-writable storage. Reports never become approval authority.
 
-```sh
-.venv/bin/python -m unittest discover -v
-```
+Serialize JSON first; private same-directory temp, full write/flush/fsync, atomic
+replace, parent fsync. Exclusive publication uses no-clobber linking, not a
+check-then-replace. Journal records are write-once and hash-chained, appended before
+SQLite commits and before remote submission. Missing/torn/conflicting evidence
+forces recovery-only behavior. Directory fsync failure after replacement reports
+uncertain durability even though a complete new file may be present.
 
-The latest full result is 177 passing tests. To simulate the entire five-message
-backup → insert → verify → Trash flow using in-memory fake services only:
+The journal must survive a **database-only** restore. Compare its account/store/head
+and full operation/backup/intent maps on every mutation. Journal-ahead state requires
+explicit local `recover-state`; it restores known IDs and pending actions without
+remote writes. `insert_pending` with no ID remains ambiguous: zero search results
+are not proof of absence. Inspect exact candidates; zero/multiple/conflicting/delayed
+candidates cannot clear intent. `reconcile` may record one genuinely verified ID.
+Never regenerate a possibly existing replacement or change a saved approval.
 
-```sh
-.venv/bin/python -m unittest \
-  tests.test_trash_workflow.SequentialWorkflowTests.test_five_messages_complete_in_order_with_hash_and_metadata_audit
-```
+Unknown Drive allocation requires manual recovery; known-ID uploads may be inspected
+and, only via explicit `--recover-drive-upload`, retried once at that same ID with
+new durable recovery intent. Trash-pending retries perform read-only recovery, not
+another Trash. Legacy/old-policy records stay inspectable/reconcilable; historical
+verification may pass but always has `current_policy_eligible=False`. They never
+silently receive new Trash eligibility or a rewritten plan.
 
-For a CLI walkthrough without credentials or mailbox access, use a **new** directory
-(generation refuses an existing directory):
+See [docs/RECOVERY.md](docs/RECOVERY.md) for exact stop/recovery commands. The journal
+is local independent evidence, **not an external anti-rollback oracle**. Losing or
+rolling back every copy of state and journal cannot be detected. A whole-environment
+rollback requires manual independent evidence and blocks automatic resumption.
 
-```sh
-.venv/bin/gmail-cleanup-synthetic generate --directory .private/handoff-demo
-.venv/bin/gmail-cleanup plan \
-  --manifest .private/handoff-demo/offline-selections.json --message-id offlineplain \
-  --offline-sources .private/handoff-demo/offline-sources.json \
-  --state .private/handoff-demo/audit.sqlite --output .private/handoff-demo/plan.json
-.venv/bin/gmail-cleanup create \
-  --manifest .private/handoff-demo/offline-selections.json --message-id offlineplain \
-  --state .private/handoff-demo/audit.sqlite
-```
+## Tests, later pilot and residual risks
 
-The last command is a dry-run, not simulated insertion. Fixture links cannot satisfy
-live Drive gates. Do not add execution/auth flags to turn this walkthrough into a
-live experiment. Use the fake-service test above for full lifecycle simulation.
+Run the [README installation and complete gate](README.md#reviewed-installation-and-offline-gate).
+Local dry-run fixtures and fake full-workflow tests need no account. The renderer
+prohibits URL fetching; actual SDK requests are redirected only to loopback servers.
+SIGKILL tests cover process crashes, not all power loss or dishonest-storage faults.
 
-For an authorized **read-only live preview**, prepare a version-2 manifest from
-inspected original part paths/hashes, then run:
+A later 5–10-message **disposable** pilot requires independent re-review, separate
+authorization, independently verified original `.eml`/attachment backups, confirmed
+Gmail/Drive identities, minimal scopes, one operator, current authoritative
+state/journal outside the restore unit, no concurrent Drive writers, and separate
+manual Trash approval. Check Gmail UI after verified creation before approving
+Trash; retain independent originals/backups beyond review. Stop at first uncertainty.
+Real-mailbox work needs an additional explicit authorization after that validation.
 
-```sh
-.venv/bin/gmail-cleanup preflight --env-auth \
-  --manifest .private/pilot/selections.json --state .private/pilot/audit.sqlite \
-  --output .private/pilot/preview.json --resolved-manifest .private/pilot/resolved.json
-```
-
-This reads Gmail/Drive but uploads nothing and changes no email. It can exit 2 if no
-accessible verified counterpart exists. `--upload-backups` separately permits Drive
-creation; it still performs no Gmail writes. Dry-run does not mean no network reads
-or local state writes. `create` without execution does not authenticate or read Gmail.
-
-For a small live pilot, follow these steps in order:
-
-1. Obtain authorization for the intended account/messages. Set up the exact scopes
-   and hosts using [GOOGLE_SETUP](docs/GOOGLE_SETUP.md); check effective grants and
-   account identity through read-only Gmail `users.getProfile` and Drive `about.get`.
-   `auth-check --env-auth` alone proves refresh/client initialization, not API access
-   or account identity. Do not automatically use a currently configured account.
-2. Use a separate `.private/pilot/` manifest/database. Inspect one supported message,
-   select exact original attachment parts/hashes and choose a zero predicted
-   Date/internalDate ordering delta. Enable any necessary backup upload explicitly.
-3. Review preview and exact persisted plan. After authorizing replacement creation,
-   use `create --execute --env-auth` with that resolved manifest/ID/database.
-4. Run `verify` on its known replacement and inspect Gmail UI, note/link/hash and
-   retained-file access. Leave the original intact if any check fails.
-5. Separately approve `trash --execute --enable-trash` with the saved exact plan
-   hash and replacement ID. Read post-Trash results before selecting another message.
-
-The complete commands are in [README's production operations](README.md#create-verify-then-separately-approve-trash).
-`workflow --execute` requires `--disposable-test-account` and is reserved for
-disposable accounts; do not misrepresent a production account to use that shortcut.
-The eleven-fixture `synthetic` harness verifies registration markers/raw hashes and
-creates replacement copies only; it never seeds, sends or trashes originals.
-
-## Recovery and troubleshooting
-
-First read `status` and the private audit, identify the saved original/replacement
-IDs/state, and stop unrelated processing. Keep the same database/manifest and
-operation marker. No blind API write retries, new databases to bypass uncertainty,
-or manual verification-state edits are acceptable.
-
-| State or failure | Action and code/tests to inspect |
-| --- | --- |
-| Drive `upload_pending` / lost upload response | Recheck the saved pre-generated file ID; resume that ID's creation only when missing and upload enabled. Do not allocate another ID. `drive.Backups`; [test_drive_preflight.py](tests/test_drive_preflight.py). |
-| `planned` | Check exact source/selection/Drive expectations, then create from the same plan. `engine.create`. |
-| `insert_pending`, no known replacement | Outcome is uncertain. Inspect Gmail read-only for the operation marker from the saved plan, identify the actual candidate, then reconcile. Do not insert again just because the response was lost. [test_engine.py](tests/test_engine.py). |
-| `inserted` / `verified` | Reverify the recorded replacement. Creation retries reuse its ID. |
-| `verify_failed` | Inspect `verification.checks` and `differences`, including header audit, timestamps, labels and Drive proofs. Fix the cause, then explicitly `verify` the known copy. Sequential runner deliberately stops on this state until resolved. |
-| `trash_pending` / `trashed` / `trashed_verify_failed` | Reinvoke approval-gated `trash` for read-only recovery: inspect exact original TRASH label/bytes/thread/date, replacement and Drive. Never issue a second blind mutation. A confirmed post-Trash failure cannot undo the prior write; stop and report it. [test_trash_workflow.py](tests/test_trash_workflow.py). |
-| Wrong hash/name/parent/size or missing/native Drive file | Do not insert/Trash. Inspect pinned counterpart and complete downloaded-byte proof. Metadata version changes alone are benign. [test_drive_integrity.py](tests/test_drive_integrity.py). |
-| Multiple matching backups/folders | Provide intended `drive_file_id`/`--drive-folder-id`; do not arbitrarily choose or create duplicates. |
-| Note link does not open | Compare the actual HTML href with `files.webViewLink`, including query parameters. Check account/session access; SHA punctuation belongs outside the anchor. An API download does not establish browser session identity. Inspect `test_drive_links.py`; do not make backups public or regenerate messages blindly. |
-| Unsupported MIME or nonzero ordering delta | Skip this message and explain why; do not force success by editing headers or weakening gates. [test_mime.py](tests/test_mime.py). |
-| OAuth/403/network/TLS failure | Check effective grants, Desktop client/token pairing, API enablement, intended account, exact active hosts and trusted CA/proxy. Renew consent when needed. Never expose request bodies or secrets. [GOOGLE_SETUP troubleshooting](docs/GOOGLE_SETUP.md#read-only-readiness-checks-before-a-pilot), [test_api_cli.py](tests/test_api_cli.py). |
-| SQLite state conflict/private-file error | Stop concurrent operators; inspect permissions and saved state. Do not delete/reset the audit or force-follow a symlink. `storage.py`. |
-
-Candidate reconciliation with the original ID, saved manifest and same database:
-
-```sh
-.venv/bin/gmail-cleanup reconcile --env-auth --manifest .private/pilot/resolved.json \
-  --message-id GMAILID --replacement-id CANDIDATEID --state .private/pilot/audit.sqlite
-```
-
-The default is inspection. Adding `--execute` persists local reconciliation and
-verifies the candidate; it does not insert a message. After fixing a known failed
-copy, use `verify` rather than recreating it. Treat nonzero command exits as failures:
-the CLI reports saved state/known replacement where available. Preserve audits even
-if an operator later resolves a failure manually in Gmail.
-
-## Limits, retention and maintenance priorities
-
-- Five received-style live messages shared one thread; other thread layouts,
-  sent-mail labels, custom label combinations and large live messages remain untested.
-  Offline received/sent/thread fixtures do not establish Gmail server behavior.
-- Signed/encrypted MIME, nested attached messages and ambiguous structures are
-  unsupported. Body normalization/notes and transport-signature removal intentionally
-  change raw bytes; original DKIM/ARC authenticity is not preserved.
-- `internalDateSource=dateHeader` cannot guarantee original ordering when Date and
-  internalDate differ. Any discrepancy remains a blocker, not an override opportunity.
-- Cross-service operations are not atomic. External changes between verification
-  and mutation remain a risk. One operator per mailbox/database is an operating
-  requirement, not a global distributed lock implemented by the tool.
-- Gmail normally removes originals from Trash after 30 days. Keep retained Drive
-  copies accessible and unchanged. Long-term retention checks and reversal automation
-  are not implemented; note links do not grant recipients Drive permissions.
-- Existing archived Drive files may be outside app access; native documents are not
-  exact binary counterparts. Complete raw MIME is held in memory, so offline 4 MiB
-  coverage does not establish every Gmail/Drive size limit.
-- External/Testing refresh tokens normally expire after seven days. Google OAuth
-  app verification/distribution requirements differ from environment publication.
-- Ignored local audits/credentials can be included in an environment snapshot; do
-  not distribute snapshots as sanitized source. Review staged paths/content before
-  committing, and never force-add private evidence.
-
-When changing behavior, begin with its code owner and regression test above, preserve
-existing approved-plan compatibility, and rerun the full offline suite. Any new live
-behavior should first use explicitly authorized disposable fixtures. Keep this
-document, [README](README.md), [setup guide](docs/GOOGLE_SETUP.md) and [REPORT](REPORT.md)
-consistent; report measured API/UI outcomes separately from assumptions.
+Residuals: remote state can change after coherent checks; proxies/servers can replay
+outside this client; no global exactly-once transaction; whole-history rollback is
+undetectable locally; storage must honor fsync; narrow MIME/HTML support; no new
+live validation of policy 2; historical sent/large/custom-label evidence is offline
+only; OAuth token lifetime/policy and Trash expiry are external. Review REPORT before
+making any broader preservation or operational readiness claim.

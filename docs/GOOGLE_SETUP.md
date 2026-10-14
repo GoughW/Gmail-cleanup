@@ -1,8 +1,11 @@
 # User-owned Google Cloud and OAuth setup
 
-This guide configures direct Gmail/Drive API access. Credentials do not authorize
-mailbox changes. The completed live test used a disposable account; a real-mailbox
-pilot requires its own account check, private manifest, state database and approval.
+This guide describes future direct Gmail/Drive API setup, not authorization to
+perform it. Reviewer remediation is local-only; the new policy requires independent
+re-review before a separately authorized disposable pilot. Historical live evidence
+predates this revision. A later real-mailbox pilot requires additional explicit
+authorization, account checks and independently retained original backups.
+Read [MAINTAINER.md](../MAINTAINER.md) and [RECOVERY.md](RECOVERY.md) first.
 
 ## Project, APIs and exact scopes
 
@@ -35,50 +38,27 @@ does not change OAuth app status or token lifetime. Workspace policy can restric
 
 ## Obtain credentials on your own computer
 
-Use Python 3.11+ on the computer running your browser. Store all credential files in
-a private directory outside git (or `.private/`), with file permissions 600. With
-the project installed using `pip install -e '.[gmail]'`:
+Use Linux/Python 3.12 for this reviewed release. Store credential files privately
+outside git (or `.private/`) with permissions 600 in owned directories. Install the
+complete exact `requirements.lock`, then the project without dependency resolution
+or isolated build, following [README.md](../README.md). Do not install an unlocked
+SDK/auth stack: transport safety depends on the reviewed versions.
+
+With separate explicit consent authorization on the computer running your browser:
 
 ```sh
 gmail-cleanup auth --credentials .private/gmail-oauth-desktop.json \
   --token .private/gmail-drive-oauth-token.json --modify --drive
 ```
 
-Alternatively, this standalone script needs only google-auth-oauthlib:
-
-```sh
-python3 -m venv .private/oauth-venv
-.private/oauth-venv/bin/python -m pip install 'google-auth-oauthlib>=1.2,<2'
-.private/oauth-venv/bin/python - <<'PY'
-import json
-import logging
-import os
-from pathlib import Path
-from google_auth_oauthlib.flow import InstalledAppFlow
-
-target = Path('.private/gmail-drive-oauth-token.json')
-scopes = ['https://www.googleapis.com/auth/gmail.modify',
-          'https://www.googleapis.com/auth/drive.file']
-flow = InstalledAppFlow.from_client_secrets_file('.private/gmail-oauth-desktop.json', scopes)
-logging.getLogger('google_auth_oauthlib.flow').disabled = True
-credentials = flow.run_local_server(
-    host='localhost', port=0, open_browser=True, timeout_seconds=180, prompt='consent',
-    authorization_prompt_message='Complete authorization in your local browser.',
-    success_message='Authorization complete. You may close this window.')
-if not credentials.refresh_token:
-    raise SystemExit('No refresh token returned; repeat Desktop consent.')
-fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-with os.fdopen(fd, 'w') as output:
-    json.dump(json.loads(credentials.to_json()), output, indent=2)
-print('Private OAuth token saved; no Gmail or Drive file request was made.')
-PY
-```
+The command uses the locked desktop OAuth library and atomic private exclusive token
+publication. It refuses aliases between credentials and token output before consent.
+Never run consent, token refresh or account checks as part of offline remediation.
 
 Choose the intended account deliberately and verify the app/project and both scopes
 in the consent screen. The token belongs to that account, not necessarily the
 project owner. Use a fresh token filename when repeating consent; commands refuse
-overwriting credential files. On Windows, adapt the virtualenv Python path; the
-tool's private-file permission checks were tested on Linux.
+overwriting credential files. This release is Linux-only; Windows and other platforms are not declared supported.
 
 ## Secure environment bindings
 
@@ -102,7 +82,7 @@ consent and update the existing refresh-token binding. Keep client ID/secret pai
 with the client that issued the token. Desktop OAuth JSON is not an application
 default credential; do not assign it to GOOGLE_APPLICATION_CREDENTIALS.
 
-## Exact runtime hosts and environment publication
+## Exact runtime hosts and future environment setup
 
 | Required cloud runtime host | Purpose |
 | --- | --- |
@@ -124,15 +104,16 @@ account. That browser host is separate from the three cloud API runtime hosts.
 The tool does not change file sharing permissions or fetch authenticated browser
 pages; an OAuth API-access check is not a browser-session check.
 
-Review/save the environment settings, then use the product's **Publish** action.
+Only when separately authorized, review/save environment settings and use the product's **Publish** action. This remediation task does not publish or update live settings.
 Draft saving does not publish the environment. The available agent tools save
 installation/startup instructions and host configuration; publication is a product
 UI action. A snapshot can contain ignored `.private/` files as well as source code:
 retain the disposable audit securely and do not distribute that snapshot as source.
-Use separate credentials/state for the real-mailbox pilot. Reinitialize OAuth/API
+Use separate credentials/state for a separately authorized pilot; independently retain
+its journal outside the database/environment restore unit, and do not reset state. Reinitialize OAuth/API
 connections in every new runtime; saved processes and connections do not survive.
 
-## Read-only readiness checks before a pilot
+## Future read-only readiness checks (separate authorization required)
 
 ```sh
 cd /workspace/Gmail-cleanup
@@ -140,14 +121,22 @@ cd /workspace/Gmail-cleanup
 ```
 
 This refreshes OAuth in memory and initializes the client, with no mailbox request.
-It is not a complete account or API-access check. Before any real-mailbox write:
+It is not a complete account or API-access check. Before a future independently reviewed disposable pilot, and again before any separately
+authorized real-mailbox write:
 
 1. Verify the refresh response's effective granted scopes include both exact URLs.
 2. Use `users.getProfile(userId='me')` and Drive `about.get(fields='user')` through
    the direct API client to confirm access and the intended account. Keep identity
    details private; do not print tokens or raw API exceptions.
 3. Check the active network policy and actual read calls on all three runtime hosts.
-4. Inspect only explicitly allowlisted pilot messages and run the read-only preview.
+4. Independently retain/verify original `.eml` and attachment backups. Inspect only
+   explicitly allowlisted supported messages; confirm zero predicted ordering delta.
+5. Bind new state/journal to the SHA-256 of the Gmail profile address after strip/
+   casefold/UTF-8. Use `--initialize-state --mailbox-key EXPECTED_KEY` only once, with
+   `--journal` outside the database restore unit. Missing history is a stop, not
+   permission to initialize again. One operator and no concurrent Drive writers.
+6. Run read-only preview, then separately authorize upload, replacement creation
+   and exact manual Trash approval. Retain backups beyond the review period.
 
 Missing/expired grants require fresh local consent and a secure binding update.
 403 errors can indicate scope, API enablement or account policy; network/TLS failures

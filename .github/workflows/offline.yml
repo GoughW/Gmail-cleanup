@@ -1,4 +1,4 @@
-name: Offline tests
+name: Locked offline safety gate
 on: [push, pull_request]
 jobs:
   offline:
@@ -8,4 +8,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m unittest discover -v
+      - name: Offline renderer libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
+      - name: Install exact reviewed stack
+        run: |
+          python -m pip install --no-deps -r requirements.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+          python -m pip check
+      - name: Full gate with fake bindings and loopback-only Python network
+        env:
+          GMAIL_CLIENT_ID: LOCAL-FAKE-CLIENT
+          GMAIL_CLIENT_SECRET: LOCAL-FAKE-SECRET
+          GMAIL_REFRESH_TOKEN: LOCAL-FAKE-REFRESH
+          GMAIL_OAUTH_SCOPE: https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/drive.file
+        run: python tests/run_offline.py

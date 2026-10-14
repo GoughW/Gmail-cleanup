@@ -1,267 +1,159 @@
 # Gmail attachment cleanup
 
-**Taking over this repository? Start with [MAINTAINER.md](MAINTAINER.md)** for the
-architecture, safety gates, state recovery, simulations and pilot checklist.
+A small synchronous Python CLI using the Gmail and Drive APIs directly. An explicit
+message-ID / MIME-part / decoded-SHA-256 allowlist selects attachments. The workflow
+is **Gmail read → Drive backup → independent content verification → reconstruct →
+Gmail insert → strict verification → separately approved original-message Trash**.
+Nothing is sent. The replacement has a new Gmail ID. The tool has no other removal
+path, scheduler, GUI, connector, or automatic search-result cleanup.
 
-A small Python CLI using the Gmail and Drive APIs directly. It backs up explicitly
-selected attachments, verifies the retained bytes, inserts a reconstructed email
-without sending, and verifies preservation before moving its original to Trash.
-Gmail assigns a new message ID. Each message must be explicitly allowlisted; search
-results are never processed automatically. There is no GUI, scheduler or connector.
+**This revision is submitted for independent re-review, not approved for live use.**
+The historical five-message disposable test predates the reviewer fixes. This task
+used only fake services and loopback servers; no account access was performed.
+Start with [MAINTAINER.md](MAINTAINER.md) for the complete operator/agent mental model,
+[REPORT.md](REPORT.md) for evidence and limitations, and
+[docs/RECOVERY.md](docs/RECOVERY.md) before any interrupted-run recovery.
 
-The five-message disposable-account workflow passed API verification and the user
-confirmed correct Gmail UI presentation. Start production use with a small,
-individually reviewed pilot; see [REPORT.md](REPORT.md) for remaining limitations.
+## Reviewed installation and offline gate
 
-## Install, credentials and network
-
-Python 3.11+; offline processing/tests need only the standard library. Use the
-existing isolated checkout:
+Supported: **Linux, Python 3.12**, owned private local storage honoring fsync and
+hard-link/rename semantics. Other Python versions/platforms are not declared safe.
+Pango/font libraries are needed for the independent offline renderer; on Ubuntu:
 
 ```sh
-cd /workspace/Gmail-cleanup
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[gmail]'
-.venv/bin/python -m unittest discover -v
+sudo apt-get install libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --no-deps -r requirements.lock
+.venv/bin/python -m pip install --no-deps --no-build-isolation -e .
+.venv/bin/python -m pip check
+.venv/bin/python tests/run_offline.py
 .venv/bin/gmail-cleanup --help
 ```
 
-Enable Gmail API and Drive API in your own Google Cloud project. Use Desktop OAuth
-and your own credentials, following [the full setup guide](docs/GOOGLE_SETUP.md).
-The production workflow requires exactly:
+The gate verifies every exact locked dependency, strips Gmail credential bindings,
+blocks non-loopback Python network access in the runner and spawned children, and
+fails on any test failure or skip. It includes the actual Google SDK/HTTP stack,
+local TLS/proxy/fault servers, independent HTML parser/PDF renderer, and SIGKILL
+recovery drills. `python -m unittest discover -v` is useful during development but
+is not the complete network-isolated, lock-validated acceptance gate.
+
+## Local dry-run walkthrough
+
+All commands here are local. The generated links and IDs are fictional.
+
+```sh
+mkdir -m 700 -p .private
+.venv/bin/gmail-cleanup-synthetic generate --directory .private/demo
+.venv/bin/python - <<'PY'
+from gmail_cleanup.api import OfflineMailbox
+print(OfflineMailbox('.private/demo/offline-sources.json').mailbox_identity())
+PY
+```
+
+Use that `offline:<hash>` as `OFFLINE_MAILBOX_KEY` below. Initialization is explicit
+and occurs only once for a genuinely new local inventory/state/journal:
+
+```sh
+.venv/bin/gmail-cleanup plan --offline-sources .private/demo/offline-sources.json \
+  --manifest .private/demo/offline-selections.json --message-id offlineplain \
+  --state .private/demo/audit.sqlite --journal .private/demo/recovery \
+  --initialize-state --mailbox-key OFFLINE_MAILBOX_KEY --output .private/demo/plan.json
+.venv/bin/gmail-cleanup create --manifest .private/demo/offline-selections.json \
+  --message-id offlineplain --state .private/demo/audit.sqlite \
+  --journal .private/demo/recovery
+```
+
+The second command defaults to dry-run and makes no network request. The offline
+inventory adapter cannot insert or Trash. Full simulated backup/insert/Trash flows
+use observable fake services in `tests/test_engine.py`, `test_drive_preflight.py`,
+`test_trash_workflow.py` and the interruption/recovery tests.
+
+## Later, separately authorized operations
+
+Do not run these against an account before independent review and explicit task
+authorization. [GOOGLE_SETUP.md](docs/GOOGLE_SETUP.md) explains account consent,
+identity confirmation and secure configuration. Required production scopes are
+exactly:
 
 ```text
 https://www.googleapis.com/auth/gmail.modify
 https://www.googleapis.com/auth/drive.file
 ```
 
-The cloud runtime needs exactly these API hosts: `oauth2.googleapis.com` (refresh),
-`gmail.googleapis.com` (Gmail), `www.googleapis.com` (Drive metadata/upload/download).
-Local browser consent and dependency installation have separate network needs
-described in the setup guide. Preserve proxy settings, CA trust and TLS verification.
+Required API runtime hosts: **oauth2.googleapis.com**, **gmail.googleapis.com**,
+**www.googleapis.com**. Browser consent, Drive-viewer links and public dependency
+installation have separate hosts described in the setup guide.
 
-## Inspect and choose attachments
+Create a version-2 selection manifest after read-only inspection, for example
+[backup-selection.example.json](examples/backup-selection.example.json). Select
+parts by path/hash, never filename alone. Prepare private original `.eml` and
+attachment backups independently, confirm the intended Gmail and Drive accounts,
+and calculate the expected mailbox key as SHA-256 of the Gmail profile email
+address stripped and case-folded (UTF-8). Do not infer identity from a token name.
 
-Use a private directory and one durable state database per mailbox. Do not mix a
-real-mailbox pilot with the disposable account's database or manifests. Back up that
-database; it records uncertain remote operations and prevents duplicate retries.
-
-Start with a version-1 inspection manifest containing only explicitly selected IDs
-and empty attachment selections:
-
-```json
-{"version": 1, "allowlist": ["GMAILID"], "messages": {"GMAILID": []}}
-```
-
-```sh
-gmail-cleanup inspect --env-auth --manifest .private/pilot/inspect.json \
-  --message-id GMAILID --output .private/pilot/inventory.json
-```
-
-Select by original MIME part path and decoded SHA-256, never filename alone. `0` is
-the root; `0.1` is its second child. Replace all placeholders with actual inspected
-values. The [backup example](examples/backup-selection.example.json) illustrates a
-version-2 manifest; its IDs/hashes are fictional:
-
-```json
-{
-  "version": 2,
-  "allowlist": ["GMAILID"],
-  "messages": {
-    "GMAILID": [{"part": "0.1", "decoded_sha256": "64 lowercase hex digits"}]
-  }
-}
-```
-
-An optional `drive_file_id` pins an intended existing binary counterpart that the
-OAuth application can access. `drive.file` does not expose your whole Drive; if an
-earlier archived file is inaccessible, authorize it to this application through a
-supported Google file-selection flow or enable a new app-created backup. This tool
-does not include that file-selection UI and does not broaden its required scopes.
-
-## Back up, hash-verify and plan
+Use one state database and one authoritative journal for the mailbox. Put the
+journal **outside the database restore unit**, e.g. a separately retained directory.
+New state requires `--initialize-state --mailbox-key EXPECTED_MAILBOX_SHA256` on
+its first preflight/plan only; existing state must never be reset to bypass a stop.
+The default `<state>.recovery` location is convenient but still must be independently
+retained, not restored with an old directory/environment snapshot.
 
 ```sh
-# Default preview: locate/read/download only; no new Drive files or Gmail changes.
-gmail-cleanup preflight --env-auth --manifest .private/pilot/selections.json \
-  --state .private/pilot/audit.sqlite --output .private/pilot/preview.json \
-  --resolved-manifest .private/pilot/resolved.json
+# Read/download preview; add initialization flags only for genuinely NEW state.
+gmail-cleanup preflight --env-auth --manifest PRIVATE_SELECTIONS \
+  --state PRIVATE_STATE --journal INDEPENDENT_JOURNAL \
+  --output PRIVATE_PREVIEW --resolved-manifest PRIVATE_RESOLVED
 
-# Explicitly enable Drive backup creation; Gmail remains read-only.
-gmail-cleanup preflight --env-auth --upload-backups \
-  --manifest .private/pilot/selections.json --state .private/pilot/audit.sqlite \
-  --output .private/pilot/preview.json --resolved-manifest .private/pilot/resolved.json
+# Explicit Drive creation permission; no Gmail write.
+gmail-cleanup preflight --env-auth --upload-backups --manifest PRIVATE_SELECTIONS \
+  --state PRIVATE_STATE --journal INDEPENDENT_JOURNAL \
+  --output PRIVATE_PREVIEW --resolved-manifest PRIVATE_RESOLVED
 
-gmail-cleanup plan --env-auth --manifest .private/pilot/resolved.json \
-  --message-id GMAILID --state .private/pilot/audit.sqlite \
-  --output .private/pilot/plan.json
-```
+gmail-cleanup plan --env-auth --manifest PRIVATE_RESOLVED --message-id ORIGINAL_ID \
+  --state PRIVATE_STATE --journal INDEPENDENT_JOURNAL --output PRIVATE_PLAN
 
-Preview validates source hashes and conservative MIME support before any upload.
-It locates app-tagged counterparts by hash or creates one only when enabled. The
-default folder is **Gmail attachment backups**; `--drive-folder-id ID` chooses an
-accessible destination. Equal-byte attachments may share a retained file. Multiple
-matching files require an explicit file ID. A corrupt tagged file is a failure,
-rather than permission to create another copy and hide the problem.
+# Review exact plan first. Default create is a local dry-run; execution is explicit.
+gmail-cleanup create --execute --env-auth --manifest PRIVATE_RESOLVED \
+  --message-id ORIGINAL_ID --state PRIVATE_STATE --journal INDEPENDENT_JOURNAL
 
-Drive verification requires the same intended file ID, expected name/parent
-destination, non-trashed binary state, expected size, and complete downloaded
-SHA-256 matching the decoded source attachment. Metadata is checked before and
-after downloading, with expected identity/destination retained across later gates.
-Deduplication pins the retained counterpart's name, which can differ from the
-source filename. Google-native documents are not accepted as binary counterparts.
+gmail-cleanup verify --env-auth --manifest PRIVATE_RESOLVED --message-id ORIGINAL_ID \
+  --state PRIVATE_STATE --journal INDEPENDENT_JOURNAL
 
-Version counters, timestamps, asynchronously populated checksums and binary MIME
-detection are advisory. Metadata changes and their classifications are audited;
-metadata churn triggers a bounded second complete download/hash check. A real
-identity/destination/size/content mismatch blocks insertion or Trash. Drive checksum
-metadata alone is insufficient. The tool exposes creation, listing, reading and
-downloading; it does not update, move, share or trash existing Drive files.
-
-Only a fully successful preview writes resolved version-1 selections and plans.
-A manually supplied link/hash can be used for planning, but cannot bypass fresh
-Drive download verification before creation and Trash. The exact plan contains
-selected parts, decoded hashes, retained URLs, original/replacement inventories,
-header edits, labels, thread, timestamps, size deltas and a plan SHA-256.
-
-Automatic backups store Drive's canonical `files.webViewLink` verbatim in the
-verified proof, resolved manifest and planned note. Query parameters such as
-`usp` or `resourcekey` are preserved. A missing, unsafe or wrong-file canonical
-link blocks automatic resolution; the tool does not invent a replacement URL.
-Existing approved/manual URLs remain unchanged for immutable-plan recovery, while
-fresh proofs separately record the current canonical link for the same file.
-
-## Create, verify, then separately approve Trash
-
-```sh
-# Default dry-run; no authentication or mailbox request.
-gmail-cleanup create --manifest .private/pilot/resolved.json \
-  --message-id GMAILID --state .private/pilot/audit.sqlite
-
-# After reviewing the exact plan and authorizing this message's replacement:
-gmail-cleanup create --execute --env-auth --manifest .private/pilot/resolved.json \
-  --message-id GMAILID --state .private/pilot/audit.sqlite
-
-gmail-cleanup verify --env-auth --manifest .private/pilot/resolved.json \
-  --message-id GMAILID --state .private/pilot/audit.sqlite
-
-gmail-cleanup status --manifest .private/pilot/resolved.json \
-  --message-id GMAILID --state .private/pilot/audit.sqlite
-
-# After reviewing the verified replacement and explicitly approving Trash:
-gmail-cleanup trash --execute --enable-trash --env-auth \
-  --manifest .private/pilot/resolved.json --message-id GMAILID \
-  --state .private/pilot/audit.sqlite \
+# Separate manual approval AFTER inspecting verification and the Gmail UI.
+gmail-cleanup trash --execute --enable-trash --env-auth --manifest PRIVATE_RESOLVED \
+  --message-id ORIGINAL_ID --state PRIVATE_STATE --journal INDEPENDENT_JOURNAL \
   --approve-plan EXACT_PLAN_SHA256 --approve-replacement EXACT_REPLACEMENT_ID
 ```
 
-Creation regenerates approved bytes, checks the original and Drive, persists insert
-intent, and calls `users.messages.insert` with `internalDateSource=dateHeader`.
-It never sends. The original remains untouched until the separately enabled Trash
-operation passes fresh original, replacement, thread and Drive checks. Trash is the
-production behavior; it calls `users.messages.trash` on the exact original ID.
+Each command validates output aliases before authentication or state initialization.
+Reports are not execution authority. Approved plans/bytes cannot be overwritten.
+Stop at the first uncertainty. Do not clean up extra replacements automatically.
+The sequential `workflow` command is restricted to disposable-account operation;
+a later pilot uses separate single-message creation and manual Trash approval.
 
-Verification requires exact From/To/Cc/Subject and other non-transport root headers,
-Message-ID/In-Reply-To/References, Date/internalDate, labels including
-UNREAD/STARRED/SENT, thread identity and membership, operation marker, decoded
-plain/HTML content including the approved note, attachment removal and every
-remaining resource hash/header. Signed/encrypted MIME, nested attached emails,
-malformed encodings and ambiguous layouts are skipped with reasons. Inline images
-and CID-referenced resources are protected. Unselected attachments remain exact.
+## Supported content and retention
 
-The Date header and Gmail internalDate can differ in real mail. Any replacement
-internalDate difference from the original fails verification even if it agrees
-with the requested dateHeader policy. The plan reports the predicted ordering
-delta; choose a zero-delta pilot first. Headers are never silently changed to force
-threading or duplicate Message-ID handling. No general preservation guarantee is
-inferred from the limited live test.
+Supported plain-text bodies have only recognized charset parameters; flowed/delsp,
+unknown/duplicate/malformed parameters fail before backup upload. HTML supports a
+small balanced, unstyled passive profile. Active/raw-text/style content, hiding
+attributes, parse repair, unfinished comments and unusual nesting are rejected.
+Signed/encrypted MIME, attached emails and ambiguous layouts are rejected.
+**Every selected Content-ID or Content-Location resource is protected**, even if
+apparently unreferenced. Unselected attachments and inline images remain exact.
 
-## Cleanup note and transport headers
+Drive proof requires the same file ID/name/parent/size, non-trashed binary state,
+and a complete downloaded SHA-256 matching source, bracketed by an unchanged valid
+version. One changed bracket is discarded and retried once; a second changed
+bracket fails. Missing checksum is allowed; a populated contradictory SHA-256 fails.
+Timestamps and other benign metadata are audited, not assumed immutable.
 
-Original decoded correspondence is retained and a note is appended to each text
-and HTML body. Text uses this format once per removed attachment:
+Text notes append the original filename, canonical Drive `webViewLink` and verified
+SHA-256. HTML notes insert before the unambiguous closing body or at a validated
+fragment boundary; original source outside that span is untouched. Filenames and
+links are escaped, parsed href equals the canonical URL, and following punctuation
+stays outside the anchor. Drive backups remain private. See the exact format and
+transport-header policy in [MAINTAINER.md](MAINTAINER.md).
 
-```text
-[Attachment cleanup: retained copies; SHA-256 recorded below]
-Removed attachment: <original filename>
-Retained copy: <Drive API canonical webViewLink>
-SHA-256: <verified decoded source/Drive SHA-256>
-```
-
-HTML uses a separator and list containing each escaped filename, clickable Drive
-URL and the same hash. The link identifies the verified retained file; creating the
-note does not change sharing permissions. Bodies normalize to UTF-8/base64, with
-changes audited. Tiny attachments may cost less space than the note; actual size
-deltas are reported. Removing invalid transport signatures can also reduce size.
-
-HTML attribute escaping converts query `&` to `&amp;` once; a parsed anchor's `href`
-is exactly the canonical URL. The semicolon before `SHA-256` is after `</a>` and
-outside the quoted `href`. Browser access needs the owning/authorized Google
-account's session; successful API download does not establish which account is
-active in your browser. Never make a backup public to resolve a sign-in problem.
-
-Reconstruction removes root DKIM-Signature, DomainKey-Signature,
-X-Google-DKIM-Signature, ARC-Seal, ARC-Message-Signature,
-ARC-Authentication-Results, Authentication-Results, Received-SPF and
-X-Google-Original-Authentication-Results. Original Received trace remains in the
-reconstruction. Post-insert comparison tolerates only these root transport/auth
-headers and Received differing or being added by Gmail. It regenerates the exact
-approved bytes and validates their persisted hash/inventory/header fingerprints
-before applying this narrow exception. All other root headers and all nested MIME
-headers/content remain strict. Both original-to-replacement and expected-to-observed
-header differences are audited for every MIME part, including value hashes and
-order/casing sequences. The replacement does not retain original DKIM/ARC authenticity.
-
-## Interrupted runs and retries
-
-Keep the same mailbox-specific database and manifests. Run one operator at a time;
-do not bypass an incomplete operation by starting a new database. API writes have
-no automatic retry. SQLite saves operation intent and events before mutations.
-
-| Saved state | Recovery |
-| --- | --- |
-| Drive `upload_pending` | Reuse the saved pre-generated file ID; inspect it before a same-ID create retry. |
-| `planned` | Recheck source and Drive; creation may proceed from the identical saved plan. |
-| `insert_pending` without replacement ID | Outcome is uncertain. Inspect Gmail for the operation marker and reconcile the actual ID; never blindly insert again. |
-| `inserted` / `verified` | Reverify the known replacement; creation retries reuse its ID. |
-| `verify_failed` | Inspect the audit and created replacement; after fixing the substantive cause, run explicit `verify` on that ID. The original stays untouched. |
-| `trash_pending` / `trashed` / `trashed_verify_failed` | Recover by read-only inspection of the recorded original/replacement/Drive state, without another Trash or insert request. |
-
-Inspect a candidate with `reconcile --replacement-id ID`; add `--execute` only to
-persist local recovery and run verification, not to insert another email. `trash`
-with the recorded approvals also performs read-only recovery once Trash intent
-exists. After Trash, the original must still be present with its exact bytes,
-thread and timestamp and a TRASH label. Replacement and Drive checks run again.
-A fetch/auth error cannot establish success. A confirmed post-Trash failure is
-reported and stops progression; it cannot undo a completed remote write.
-
-## Disposable synthetic harness
-
-`gmail-cleanup-synthetic generate --directory .private/fixtures` produces eleven
-offline fixtures covering bodies, inline images, Unicode/duplicate names, selective
-removal, large attachments, sent-style messages and a reply pair. Import fixtures
-yourself into a disposable mailbox without sending, and record their IDs for
-`register`. Registration checks exact generated bytes, marker and metadata.
-`preflight` backs up selected attachments; separately enabled `run --execute`
-creates replacements only. The harness never sends or trashes originals.
-
-The `workflow` command completes each allowlisted message before the next and stops
-at the first failure. Its execution requires `--execute --enable-trash
---disposable-test-account`; use it only for disposable accounts. A production
-pilot uses the separately approved individual operations above. The completed live
-test's manifests/database remain private and must not be rerun as fresh operations.
-
-## Private records and retention
-
-Keep credentials, tokens, raw email, manifests, reports and SQLite audits in ignored
-`.private/` or outside the repository. New private files are mode 600 and directories
-mode 700; final symlinks are refused. Audits can contain subjects, filenames, Gmail/
-Drive IDs, labels, Date and threading-header values, links and hashes. They do not
-contain raw email bodies, recipient lists or OAuth tokens. Treat them as sensitive.
-Never enable HTTP debug logging or shell tracing. `.gitignore` is a guard against
-accidental staging, not permission to force-add private files.
-
-Trash is temporary retention: Gmail normally removes originals after 30 days.
-Attachment backups must remain accessible and unchanged; ongoing retention
-monitoring is outside this first version. Remote calls are not atomic, so external
-changes between verification and mutation remain a residual risk.
+Gmail normally expires Trash after 30 days. Retain independent originals and Drive
+backups beyond the review period; ongoing retention monitoring is outside scope.
+Remote operations are not atomic. See [REPORT.md](REPORT.md) for residual risks.

@@ -19,6 +19,9 @@ live-fixtures/
 *.sqlite*
 *.db
 *.db-journal
+*.recovery/
+*.inspection/
+recovery/
 *.eml
 *.mbox
 *.msg
