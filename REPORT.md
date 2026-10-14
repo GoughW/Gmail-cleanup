@@ -1,252 +1,204 @@
-# Reviewer-remediation completion report — 14 October 2026
+# R1/R2 independent re-review remediation — 14 October 2026
 
-**Submitted for independent re-review, not approved for live use.** Reviewed baseline
-was exactly `b21638b71f6f100abfeb1d3ad40bc041a340e8af`; HEAD and clean working tree were
-confirmed before creating local branch `reviewer-remediation`. No alternate starting
-revision, unrelated user change, push, publication, account access, OAuth consent,
-real-token refresh, live migration or remote mutation occurred. Public package
-retrieval was used for local development; API tests use fake credentials and
-loopback servers only. The historical five-message live test below is separate
-from the new policy-2 local evidence.
+**Local implementation submitted for independent re-review; no approval for live
+Trash use.** Starting HEAD was exactly
+`07cc713c3b76908b6d36232771ccca8709df5244`, branch `reviewer-remediation`, with empty
+`git status --short`. Original baseline remains
+`b21638b71f6f100abfeb1d3ad40bc041a340e8af`. No different starting revision or unrelated
+user change was substituted. Existing ignored private files and the old Git bundle
+were preserved. No Gmail/Drive/OAuth access, real-credential refresh, connected-account
+use, live external API operation, push, merge, publication or live migration occurred.
 
-## Focused local implementation commits
+The optional reviewer REVIEW.md, independent_regressions.py and log under
+`/workspace/outputs/gmail-rereview/` were absent. The uploaded findings supplied
+complete reproduction instructions; their absence was not a blocker.
 
-- `2271f3d2c5623ebf7542e924571785c889693d7a` — exact SDK lock and single-attempt transport.
-- `4531281edb4bef2d83f73ac44ed00d2a84152345` — durable independent history, paths, intents and interruption drills.
-- `e20b4d9cecba826a5931b99aff12a49365a1ec23` — conservative MIME/HTML and coherent Drive proof.
-- `493819e620b2fbc480096f8e96d53a1a5be1f7b7` — final path/recovery hardening and independent baseline/legacy/crash regressions.
+## Before/after evidence and implemented fixes
 
-The final documentation/CI/offline-gate commit is the HEAD containing this report;
-use `git log b21638b..HEAD` for its identity without a self-referential report hash.
-All commits are local; no push/publication. Tracked working tree is clean after the
-final commit. Existing ignored `.private/`, virtualenv/build metadata and caches
-remain untouched; no committable private/untracked artifact was introduced. A
-changed-file secret-pattern scan found no matches, and decoded legacy test inputs
-were confirmed to be fictional `.invalid` messages. That scan is a guard, not a
-proof that arbitrary secret formats are impossible.
+### R1 — original interpreted HTML could change while verification passed
 
-## Finding-by-finding implementation and reproduced evidence
+Independent full-lifecycle reproduction used the exact reviewer input with real
+U+2028 and LF characters: `<html><body>\u2028xxxx\nAA&amp;BB</body></html>`, standard
+MIME serialization, an explicit fake selection, temporary Store and FakeGmail.
+On starting HEAD, create returned `verified`, fake original `abc123` was Trashed,
+and the independent tinyhtml5 oracle found original displayed `AA&BB` changed to
+literal `AA&amp;BB`. The note was present; source-span preservation alone had not
+protected interpretation. This new regression failed for that exact reason.
 
-The archived baseline was executed with fake services, temporary files and the
-same deterministic synthetic messages used by independent regression tests.
+Root cause: HTMLParser line coordinates count LF only; str.splitlines also counts
+Unicode/control separators. The closing-body offset pointed between `&` and `amp;`.
+The old note-subtree check verified the added note without comparing original
+interpreted content.
 
-| Finding | Reproduced baseline defect | Revised behavior and evidence | Implementation / tests |
-| --- | --- | --- | --- |
-| F1 unsupported body semantics | `format=flowed; delsp=yes` lost semantics but reached fake Trash: **1 request**. | Only supported charset body parameters; flowed/delsp, unknown, empty, malformed and duplicate parameters rejected **before allocation/upload/insert**, zero mutations. Legacy charsets and Content-Language retained, original correspondence independently compared. | `mime.py:178`; `test_mime_policy.py`, `test_mime.py:188`. |
-| F2 Drive content stability | Content changed immediately after the second download; fake Trash **1**, detected only by postcheck (`trashed_verify_failed`). | At most **two complete version-bracketed downloads**; accepted bracket must be unchanged valid positive version and exact downloaded hash/size. Final churn/missing version/contradictory populated SHA-256 blocks. Same late-change regression now **zero Trash**. Actual SDK two-chunk media corruption rejected independently. | `drive.py:178`; `test_drive_stability.py`, `test_drive_integrity.py`. |
-| F3 referenced resources | Selected Content-Location attachment removed: **1**. | All selected CID/Location resources protected, even apparently unreferenced/attachment-disposition. Encoded/entity/CSS-escaped references cannot bypass protection; unselected resource bytes independently retained. | `mime.py:314`; `test_mime_policy.py`, `test_drive_preflight.py`. |
-| F4 path aliasing | CLI report path equaled SQLite path: exit **0**, database overwritten by JSON. | Central pre-auth input/state/sidecar/journal/output canonical/inode policy, output/output collisions, private singly linked targets, pinned descriptors and race rechecks. Same CLI alias exits **2**, auth not called, input bytes unchanged. Linked SQLite sidecars rejected before connection. | `paths.py:83,168`, `storage.py:70,156`; `test_artifact_safety.py`. |
-| F5 stale/restored state | Restore planned SQL after accepted insert/lost response: **2 inserts**. | Independent write-once history, account/identity/plan/action binding, durable intent before mutations, lifetime flock. SQL-only restore blocks; explicit local journal recovery preserves pending state/known IDs/approval; reconciliation reuses existing replacement: **1 insert total**, no blind retry. Missing/conflicting/torn evidence blocks. Unsafe historical flowed fixture remains inspection-only. | `recovery.py`, `storage.py:174,249,286`, `engine.py:165,218,259,291`; journal/process tests. |
-| F6 HTML note insertion | Unfinished HTML comment swallowed appended note: **0 parsed anchors**, yet **1 Trash**. | Bounded passive balanced HTML eligibility; unsupported contexts fail before mutations. Exact source-preserving span inside body / safe fragment; composed standards-parsed note/anchors checked. Independent parser plus offline PDF renderer verifies visible filename/hash and exact URL. | `html_profile.py`, `mime.py:320`; `test_mime_policy.py`, `test_mime.py`, `test_drive_links.py`. |
-| F7 transport replay | Actual Google SDK call with `num_retries=0`, httplib2 `RETRIES=1`, accepted POST then missing response: **2 identical POSTs** on both **0.22.0** and baseline-installed **0.32.0**. | Locked stack and isolated single-attempt adapter. Actual SDK fault servers observe **one submission** for missing/bad/partial response, reset/timeout, auth/rate/server errors/redirects. Engine keeps ambiguous intent/original; no implicit second insert or Trash. TLS trust and loopback HTTP CONNECT proxy preserved. | `requirements.lock`, `transport.py`, `api.py:104`; `test_transport_faults.py`. |
-| F8 artifact durability | Serialization failure destroyed old report (22 partial bytes); injected write failure left **0 bytes**. | Serialize first, same-directory private temp, full write/flush/fsync, atomic replace + directory fsync; true exclusive publication. Old/new complete artifact only on tested failures/SIGKILL; concurrent creator cannot clobber winner. Directory-fsync failure reports uncertain durability. Journal torn records block; SQL FULL + supported backup drills. | `storage.py:23`, `paths.py:13`, `recovery.py`; artifact/journal/process tests. |
+Fix in `gmail_cleanup/html_profile.py`:
 
-File paths in that table refer to `gmail_cleanup/` and `tests/` respectively. The
-selected approaches were implemented rather than the earlier preliminary fixes.
-No revisions/keepForever, broad scopes, duplicate cleanup, general HTML repair or
-live state migration was introduced. No library/API contradiction required relaxing
-a gate. We chose the baseline-installed 0.32.0 as the exact reviewed transport and
-also independently reproduced the reviewer's 0.22.0 failure.
+- Precompute LF-only character offsets, matching HTMLParser.getpos exactly.
+- Require the calculated position to identify the actual ASCII closing-body token;
+  reject invalid coordinates or ambiguous context before reconstruction proceeds.
+- Retain the conservative HTML profile and original source outside the insertion span.
+- Parse original and composed HTML; validate the exact appended hr/div note nodes,
+  including their content, attributes, links and internal tails.
+- Remove only those nodes and the one parsed LF on each side corresponding to their
+  added CRLF wrappers. Reconnect **all remaining tail text** and compare the full
+  original tree, including comments, attributes, text, children and tails. None/empty
+  text both mean zero characters; meaningful whitespace is never stripped.
 
-## Exact dependency and transport evidence
+After: the exact lifecycle case preserves displayed `AA&BB`, passes genuine
+verification, produces the correct visible note/hash and decoded Drive href, and
+only then issues the one fake Trash. An injected entity-splitting offset now raises
+Unsupported even when the note parses as a valid child. Injected changes to original
+text and comment/element tails are rejected.
 
-Python **3.12.14** on Linux; declared support narrowed from 3.11+ to **3.12 only**
-(`>=3.12,<3.13`) because other versions/platforms did not receive this gate.
-`requirements.lock` pins the entire 42-package SDK/auth/HTTP/build/renderer dependency
-set, not just top-level ranges. Key versions:
+Expanded tests cover U+2028/U+2029, form feed/lone CR, LF/CRLF/mixed endings, separators
+inside comments, named/numeric references at closing-body boundaries, full documents,
+fragments, text around the note, wrong-coordinate injection, independent HTML5 trees,
+exact decoded links and visible note content. U+0085 and invalid C0 separators retain
+**existing** HTML5 invalid-codepoint rejection before allocation/upload/insert; the
+coordinate fix does not conceal the bug by rejecting supported ordinary Unicode.
+Existing malformed/style/raw-text and independent PDF-renderer tests remain intact.
 
-- google-api-python-client **2.201.0**
-- google-auth **2.61.0**, google-auth-httplib2 **0.4.4**
-- httplib2 **0.32.0**, google-auth-oauthlib **1.5.0**, PySocks **1.7.1**
-- html5lib **1.1**; independent renderer WeasyPrint **66.0**, tinyhtml5 **2.1.0**,
-  PDF assertions pypdf **6.1.1**
-- build setuptools **78.1.0**, wheel **0.45.1**
+New plans use safety/transformation policy **3** (`engine.py`); policy-2 and older
+plans/approvals are immutable, inspectable and historical-only. No automatic migration,
+silent replanning or new legacy Trash eligibility. The visible note format is unchanged.
 
-The adapter checks the critical four SDK/transport versions at runtime. It bypasses
-upstream connection-replay, challenge and redirect response machinery without a
-production global retry monkeypatch. Credentials refresh before first submission;
-post-submission 401 does not refresh/replay. Each connection is closed. Upstream
-connection creation, proxy routing, trusted CA and certificate validation remain.
-Untrusted local TLS reached zero POSTs; explicitly trusted local TLS reached one.
-HTTP CONNECT proxy test used a loopback proxy and a fictional target, never an
-external forwarded connection. Drive multipart upload and exact-message Trash
-also reached one POST when their responses were lost.
+### R2 — valid older journal could erase newer surviving SQL mutation evidence
 
-This establishes tested **client submission** behavior, not a guarantee against
-external proxy/server replay. The lock is version-complete, not a package-hash or
-OS-library supply-chain lock; CI/system Pango/font packages are separately installed.
-Any dependency update requires a new lock and the complete transport gate.
+Independent reproduction retained the planned journal prefix, accepted one fake
+insert whose response was lost, and rolled back **only** the journal while leaving
+SQL insert_pending and intent intact. Starting HEAD detected the mismatch, but
+restore_from_journal reset SQL to planned and cleared it; retry created replacement2.
+The regression failed because **two** fake insertions occurred.
 
-## Test commands and results
+Root cause: recovery trusted internal journal validity without proving that it
+contained SQL's acknowledged history. It selected journal maps and replaced SQL
+without validating surviving table/event evidence or direction.
 
-All original 177 tests remain in the suite, with stricter expectations described
-below. The final expanded gate is **228 tests; no failures, errors or skips**.
+Fix in `gmail_cleanup/storage.py` and strict journal reads in `recovery.py`:
 
-Fresh locked environment setup executed:
+- Validate SQL's sole acknowledgment record: store/account identity, typed sequence
+  and canonical hash. It must identify the exact compatible journal prefix.
+- Reject a journal older than acknowledged SQL, equal/longer divergent ancestry,
+  another store for the same mailbox, account mismatch and unreadable/malformed data.
+- Require SQL operation/backup/intent maps to equal that acknowledged prefix; every
+  surviving operation/backup event must match in order. Logs can be a subsequence
+  after earlier compatible replay; no surviving event is ignored.
+- Validate complete candidate snapshot shapes/digests/bindings, including the
+  unacknowledged suffix. Reject duplicate JSON keys and non-JSON numeric constants.
+- Require the full extension to retain known original/replacement/Drive identities,
+  immutable plans/approvals, intent bindings and observed results. A valid hash
+  extension cannot retract those facts.
+- Hold the lifetime store lock and a SQL transaction through compatibility validation
+  and replay. No authoritative SQL replacement or recovery append occurs before proof.
+  Rejection rolls back, retains both sources byte-for-byte and remains recovery-only.
+  Normal execution also checks surviving SQL evidence; reopening cannot bypass refusal.
+
+After: exact journal-only rollback is rejected, original SQL insert_pending/intent
+and journal bytes remain unchanged, and retry still has **one** fake insertion.
+Valid SQL-behind recovery remains supported, including durable journal publication
+before SQL commit. Repeated compatible recovery retains pending uncertainty, IDs,
+approvals and immutable plan bytes; no new marker or blind insertion is created.
+
+New tests also reproduce/test SQL-ahead known replacement, uncertain Drive allocation/
+upload, pending/completed Trash, SQL-only intents/backups/events, malformed metadata,
+wrong store/account, incompatible hash extensions and retracted identities. Rejected
+cases preserve both evidence sources; positive cases reuse exact known IDs and
+approvals without additional allocation/upload/Trash. A new SIGKILL test interrupts
+local recovery after its durable derived journal append but before SQL commit; a
+subsequent compatible recovery retains the uncertainty barrier.
+
+The reviewer independently reproduced Gmail duplication, not Drive/Trash duplication.
+Our added variants establish evidence-preservation/no-replay under the specified
+fake failures; they do **not** claim that every prior variant would actually have
+produced a second remote mutation. Other original-label/identity gates could also
+block a repeated Trash. Whole-history rollback remains a separate limitation.
+
+## Local test commands and results
+
+Working directory: `/workspace/Gmail-cleanup`. Reused isolated
+`/tmp/gmail-review-locked`, Python **3.12.14**, exact existing 42-package
+`requirements.lock`; no dependency or scope changes. Critical transport remains
+SDK 2.201.0, google-auth 2.61.0, google-auth-httplib2 0.4.4, httplib2 0.32.0.
+All test commands used the external-network guard and fake credentials; actual SDK
+fault/TLS/proxy tests used loopback servers only.
 
 ```sh
-python3 -m venv /tmp/gmail-review-locked
-/tmp/gmail-review-locked/bin/python -m pip install --no-deps -r requirements.lock
-/tmp/gmail-review-locked/bin/python -m pip install --no-deps --no-build-isolation -e .
-/tmp/gmail-review-locked/bin/python -m pip check
+# On the exact starting code, before production edits:
+PYTHONPATH=tests/network_guard:. /tmp/gmail-review-locked/bin/python -m unittest tests.test_rereview_regressions -v
+# 2 tests, 2 expected reproduced failures: HTML text corruption and second insert.
+
+# R1 targeted gate:
+PYTHONPATH=tests/network_guard:. /tmp/gmail-review-locked/bin/python -m unittest tests.test_rereview_regressions.IndependentRereviewTests.test_R1_exact_unicode_entity_lifecycle_preserves_interpreted_original tests.test_html_preservation tests.test_mime_policy tests.test_mime tests.test_server_headers tests.test_engine -v
+# 60 passed at that stage.
+
+# R2 expanded gate with prior Drive/Trash/crash coverage:
+PYTHONPATH=tests/network_guard:. /tmp/gmail-review-locked/bin/python -m unittest tests.test_recovery_direction tests.test_rereview_regressions tests.test_recovery_journal tests.test_drive_preflight tests.test_trash_workflow tests.test_process_interruptions -v
+# 102 passed before final supplemental cases.
+
+# Expanded independent cases and final suffix/crash evidence:
+PYTHONPATH=tests/network_guard:. /tmp/gmail-review-locked/bin/python -m unittest tests.test_recovery_direction tests.test_rereview_regressions tests.test_html_preservation -v
+# 27 passed before the final malformed-suffix case.
+PYTHONPATH=tests/network_guard:. /tmp/gmail-review-locked/bin/python -m unittest tests.test_recovery_direction tests.test_recovery_journal tests.test_rereview_regressions tests.test_process_interruptions -v
+# 35 passed including malformed suffix and local recovery SIGKILL.
+
 /tmp/gmail-review-locked/bin/python tests/run_offline.py
+/tmp/gmail-review-locked/bin/python -m pip check
+git diff --check
 ```
 
-Installations succeeded; pip check found no broken requirements. The gate validates
-every lock entry and Python version, strips credential bindings, blocks external
-Python DNS/connections (including spawned children), and rejects skipped tests.
-CI installs the exact same stack/system renderer libraries and runs this gate with
-fake bindings. **Hosted CI was not executed**; no commits were pushed/published.
+Final full gate: **256 tests passed, zero failures/errors/skips, in 107.854 seconds**. Pip check found no broken requirements;
+git diff --check passed. All prior 228 tests remain unchanged; 28 new tests cover
+R1/R2. Existing 29 SIGKILL boundaries plus the new local-recovery boundary give **30**
+distinct process-kill boundaries. No tests were removed, skipped or weakened.
 
-Earlier successful local commands included:
+Failures/unavailable checks: the initial two regression failures were intentional
+before-fix evidence and now pass. A broad optional AGENTS search encountered an
+unrelated restricted /tmp directory; repository/ancestor inspection completed and
+no required test was blocked. The optional reviewer artifacts were absent. Pip
+reported an unwritable cache warning, without affecting installation/check results.
+No test timeout or socket restriction occurred. Hosted CI and new live-account
+validation were not run; neither is authorized by this task.
 
-```sh
-.venv/bin/python -m unittest discover -v
-.venv/bin/python -m unittest tests.test_process_interruptions -v
-.venv/bin/python -m unittest tests.test_recovery_journal tests.test_artifact_safety -q
-/tmp/gmail-review-locked/bin/python -m unittest tests.test_artifact_safety tests.test_api_cli tests.test_drive_preflight -q
-```
+## Local commits and documentation
 
-Results: baseline full suite **177 passed**; direct process-interruption gate **3
-aggregate tests passed across 27 SIGKILL lifecycle boundaries**; artifact/recovery suite **26 passed**; final focused CLI/path/Drive suite **81 passed**. Artifact tests additionally SIGKILL before/
-after JSON replacement, making **29 distinct kill boundaries** overall. Fresh
-full-gate intermediate runs passed 218 and 225 tests before final additions.
-Independent local fixture-generation/CLI plan/dry-run walkthrough also passed with
-zero remote services. `git diff --check` passed.
+- `c0eb2cb4eb35398ca0c7aa50d13d539ce2dc5f0a`: faithful independent R1/R2 regressions.
+  This deliberately red intermediate commit records the defects, not readiness.
+- `052a59ceea219609ca2d8fae6259dae81e484264`: R1 coordinates/parsed-content preservation,
+  policy 3 and expanded HTML regressions.
+- `0157a4f26b7a41d66002febaadd9b8f6b3ae418a`: R2 compatible recovery direction, strict
+  complete candidate evidence and expanded recovery/crash regressions.
+- Final documentation commit: HEAD containing this report; inspect
+  `git log 07cc713..HEAD` for its SHA without a self-referential report hash.
 
-Baseline evidence commands (archive source, no live services):
+README, MAINTAINER, RECOVERY and GOOGLE_SETUP now explain exact parsed-content
+preservation, compatible recovery direction, evidence-preserving refusal and policy-2
+inspection-only behavior. No CI change was needed: its existing locked full discovery
+gate automatically includes the new tests and inherited safety matrix. No push or
+publication of any new commit. Working tree is clean after the final local commit.
+Only code/tests/necessary docs were committed; existing private artifacts, generated
+state, credentials, virtualenvs and the old bundle remain outside Git.
 
-```sh
-mkdir -p /tmp/gmail-reviewed-baseline
-# Executed as a pipeline into that separate archive, not the working tree:
-git archive b21638b71f6f100abfeb1d3ad40bc041a340e8af | tar -x -C /tmp/gmail-reviewed-baseline
-cd /tmp/gmail-reviewed-baseline
-env -u GMAIL_CLIENT_ID -u GMAIL_CLIENT_SECRET -u GMAIL_REFRESH_TOKEN -u GMAIL_OAUTH_SCOPE \
-  PYTHONPATH=/tmp/gmail-reviewed-baseline \
-  /workspace/Gmail-cleanup/.venv/bin/python \
-  /workspace/Gmail-cleanup/tests/baseline_reproductions.py
-```
+## Historical evidence and operational limits
 
-The script reproduced the F1–F8 counts in the table. Repeated with public httplib2
-0.22.0 wheel extracted under `/tmp/gmail-transport-old/package` and prepended to
-PYTHONPATH, it again observed **two identical POSTs**, zero SDK retries and RETRIES=1;
-its injected artifact write failure again left zero bytes. The deliberately unsafe
-baseline script is evidence only and is not run by the acceptance gate.
+The prior 228-test gate at 07cc713 passed but did not cover these two defects. Its
+passing result was not evidence that R1/R2 were fixed. The first-remediation report
+and F1–F8 evidence are preserved at `git show 07cc713:REPORT.md`.
 
-Unsuccessful checks are not counted as passes: initial headless Chromium attempts
-timed out with host sandbox/read-only-cache/DBus errors; we use the independent
-WeasyPrint/PDF renderer instead (the selected plan permits an offline renderer).
-An early new runner lacked a `__main__` guard and spawned workers re-entered test
-discovery; that invocation was invalid, stopped and fixed before valid full runs.
-A privacy-check assertion initially looked for plain text in the base64 synthetic
-fixture; it failed and the shell continued to a local commit. A corrected decoded
-fixture check and changed-file secret scan passed; no private artifact was staged.
-Two newly added regression assertions initially mismatched the existing API
-contract (approval includes action; a known legacy replacement returns inspection
-rather than raises). Their expectations were corrected to the stronger intended
-invariants and rerun successfully. No tests were removed, skipped, or weakened to
-obtain a passing result.
+The earlier five-message disposable-account test and user-reported Gmail UI rendering
+predate both re-reviews. They were **not rerun** and do not validate policy 3. No
+current live-use or reviewer approval is claimed. Historical sent/large/custom-label/
+other-thread evidence remains limited; a later pilot needs separate authorization.
 
-### Explained changes to original tests
+Residual requirements/risks remain: independently retained original .eml/attachment
+backups and current journal outside the SQL/environment restore unit; one operator,
+trusted private storage honoring fsync/link/rename, no concurrent Drive writers,
+separate manual Trash approval and stop on first uncertainty. Remote changes after
+verification and external proxy/server replay are possible. No atomic cross-service
+or global exactly-once guarantee. Losing/rolling back every history copy is locally
+undetectable; it cannot justify discarding newer surviving SQL evidence. SIGKILL is
+not proof against every power-loss/hardware/dishonest-storage failure. Conservative
+MIME/HTML exclusions remain; parser/PDF tests do not establish actual Gmail UI
+behavior. Trash expiry and long-term Drive retention/access are external.
 
-- Drive continuous version-change success now expects refusal; missing version and
-  contradictory SHA-256 now block. Settling-version tests inspect discarded first
-  attempt and accepted stable second attempt. Same-size corruption can fail on
-  contradictory checksum immediately rather than await a second corrupt download.
-- Benign canonical-URL change with **unchanged version** needs one complete bracket,
-  so the old unconditional two-download expectation was changed while exact link
-  and content assertions remain.
-- Apparently unreferenced attachment CID removal now expects rejection. A second
-  independently eligible attachment is removed to prove CID/image preservation.
-- Complete HTML's old whole-source-prefix assertion now checks exact source before/
-  after its insertion span, because safe insertion occurs before closing body.
-  Independent span removal additionally reconstructs the full original source.
-- Tests explicitly initialize new fake-mailbox SQL/journal and supply mailbox keys;
-  restarts never auto-reset. Fake APIs expose only a fixed fake account identity.
-  Upload failure test now requires explicit same-ID recovery before retry.
-- Linked private-output errors now expect a policy CleanupError. Existing unsafe
-  local state fixtures remain rejected; boundaries/identity/content checks remain.
-- Trash-state test setup now records the necessary durable insert intent before
-  calling current-policy verification, rather than inventing authority in SQL.
-
-## Compatibility and recovery
-
-New plans require safety/transformation policy **2**. Saved plans and approvals
-remain immutable; old reconstruction is not regenerated for a possibly existing
-replacement. Old records remain inspectable/historically reconcilable, with derived
-`recovery_only` and `current_policy_eligible=False`; the SQL approval/plan is not
-rewritten. A baseline-generated **synthetic** flowed-text legacy fixture demonstrates
-historical byte verification really passes without granting current eligibility.
-No automatic legacy migration/replanning tool is provided. An unexecuted old plan
-requires independent explicit replanning/review; do not erase history to bypass it.
-
-Retained independent journal evidence detects stale SQL after insert/upload/Trash.
-`recover-state` is local only, restores known IDs/pending intents/approval, and does
-not authenticate. Normal retries cannot repeat an ambiguous insert or Trash.
-Single reviewed candidates can be reconciled; zero/multiple/conflicting/delayed
-candidates cannot prove absence or clear intent. Known-ID upload recovery requires
-explicit permission and durable recovery intent; unknown allocation blocks.
-Missing or malformed evidence remains a stop. See [RECOVERY.md](docs/RECOVERY.md).
-
-Path protection and durable artifacts are coordinated with the journal and SQL:
-reports cannot alias execution authority or private inputs, every required intent
-is durably published before submission, and the store holds a lifecycle lock.
-Local state/history copied together from an old snapshot **cannot detect rollback
-of every copy**. This is not an external anti-rollback oracle or global exactly-once
-transaction. Whole-environment loss/rollback needs manual independent evidence.
-
-## Historical live evidence — not rerun during remediation
-
-Before this reviewed baseline/remediation, five allowlisted dummy messages in one
-received-style thread completed backup/reuse, downloaded hash verification,
-reconstruction, insert, preservation checks, original Trash and postcheck. Identical
-four-byte attachments reused one private binary backup. Ordering deltas were zero;
-duplicate Message-ID/thread membership and labels were preserved; Gmail added a
-Received trace. DKIM/ARC assertions were removed/audited. The user reported correct
-Gmail UI sender/recipient/subject/date/thread and note/link/hash rendering.
-
-The reported viewer-link issue was resolved by the user. Earlier read-only checks
-found valid hrefs/punctuation and confirmed private owner access; canonical
-webViewLink propagation was implemented at baseline. No regeneration was required.
-Those checks were historical, **not performed in this task**. No real IDs, tokens,
-links, raw correspondence or old local live audits were added to this report.
-This limited live evidence does not establish current policy-2 or sent/custom-label/
-large-message/other-thread import correctness.
-
-## Remaining validation, operational requirements and risks
-
-- Independent re-review against the supplied definition of done remains required.
-  Policy-2 live validation and hosted CI are unavailable/not authorized in this task.
-- A later separately authorized 5–10-message disposable pilot must have independently
-  verified original `.eml` and attachment backups, confirmed Gmail/Drive identities,
-  minimal scopes, one operator, authoritative current SQL + independently retained
-  journal, no concurrent Drive writers and separate manual Trash approval. Stop on
-  first failure/uncertainty; retain original backups beyond the review period.
-  Real-mailbox work requires additional explicit authorization after that review.
-- Drive proof is coherent during a bounded bracket; it does not freeze the file.
-  External modification after the last proof remains possible. Gmail/Drive have no
-  atomic cross-service transaction. No duplicate cleanup or rollback automation.
-- Local flock protects one store only, not alternate stores/hosts. Trusted private
-  directories and disciplined backup/restore are required. Descriptor checks do not
-  defend against a privileged hostile operator/storage implementation.
-- SIGKILL is process-crash evidence, not all power loss. Storage must honor fsync;
-  hardware loss/dishonest storage needs independent backups. Journal histories are
-  local private files, not cryptographically signed external evidence.
-- Every selected CID/Location, flowed/unknown-parameter body and unsupported HTML
-  fails closed. This reduces coverage of ordinary Gmail messages intentionally.
-  New transformations require explicit policy review/reapproval. PDF/parser tests
-  do not establish actual Gmail UI behavior; a later pilot must inspect it.
-- Date/internalDate divergence blocks preservation eligibility; duplicate Message-ID,
-  sent labels and threading may behave differently for other real inputs. Do not
-  silently change headers to force success.
-- Narrow transport exceptions retain semantic verification, but reconstructed mail
-  cannot preserve original delivery authenticity. External replay by proxies/servers
-  is outside tested client control.
-- Drive app-scoped visibility and native-document exclusion remain. Long-term
-  retention/access monitoring is outside scope; Gmail normally expires Trash after
-  30 days. OAuth app/token policy is external. Large MIME is held in memory; 4 MiB
-  local coverage is not proof of every API size limit. Notes can exceed tiny savings.
-
-Required production scopes remain exactly gmail.modify + drive.file, and API hosts
-remain oauth2.googleapis.com, gmail.googleapis.com, www.googleapis.com. No broader
-scope, sharing change, alternate destructive path or account action was introduced.
+Production scopes remain exactly gmail.modify + drive.file; API runtime hosts remain
+oauth2.googleapis.com, gmail.googleapis.com and www.googleapis.com. No broader scopes,
+sharing change, permanent removal, thread-wide destructive action or live migration.

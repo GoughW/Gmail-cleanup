@@ -5,7 +5,10 @@ perform it. Reviewer remediation is local-only; the new policy requires independ
 re-review before a separately authorized disposable pilot. Historical live evidence
 predates this revision. A later real-mailbox pilot requires additional explicit
 authorization, account checks and independently retained original backups.
-Read [MAINTAINER.md](../MAINTAINER.md) and [RECOVERY.md](RECOVERY.md) first.
+Read [MAINTAINER.md](../MAINTAINER.md) and [RECOVERY.md](RECOVERY.md) first. Policy-3
+HTML/recovery fixes have local evidence only. A prior policy-2 verification or valid
+journal file does not approve a live run; compatible acknowledged history is required
+before local recovery, and legacy plans stay inspection-only.
 
 ## Project, APIs and exact scopes
 

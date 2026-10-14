@@ -5,7 +5,8 @@ exact decoded bytes on Drive. Gmail cannot edit attachments in place, so the too
 imports a replacement, verifies it, then separately approves original-message
 Trash. A new Gmail ID is unavoidable. Nothing is sent and no thread-wide write is
 exposed. This revision implements reviewer findings F1–F8 from baseline
-`b21638b71f6f100abfeb1d3ad40bc041a340e8af`; **independent re-review is required before
+`b21638b71f6f100abfeb1d3ad40bc041a340e8af`, followed by R1/R2 fixes starting exactly
+at `07cc713c3b76908b6d36232771ccca8709df5244`; **independent re-review is required before
 any live pilot**. Historical disposable-account success does not validate the new
 policies. No live account/OAuth access occurred during remediation.
 
@@ -32,11 +33,12 @@ or credentials. Audits contain sensitive IDs, filenames, header values and hashe
 | `api.py`, `transport.py`, `requirements.lock` | OAuth/direct API adapters and exact reviewed single-submission transport. |
 | `mime.py`, `html_profile.py` | Supported MIME/body profile, protected resources, source-preserving notes, inventories and narrow transport exceptions. |
 | `drive.py`, `preflight.py` | Preallocated uploads/deduplication, two bounded coherent complete downloads, canonical links and locally reconstructed plans. |
-| `engine.py` | Policy version 2, immutable approval/bytes, exact create/verify/reconcile/Trash and post-Trash gates. |
+| `engine.py` | Policy version 3, immutable approval/bytes, exact create/verify/reconcile/Trash and post-Trash gates. |
 | `fixtures.py`, `examples/` | Fictional inputs; synthetic cases and selection formats. |
 | `tests/helpers.py`, `process_helpers.py` | Observable fake accounts; independent file-backed remote state for process-kill tests. |
 | `tests/test_mime_policy.py`, `test_drive_stability.py` | Independent correspondence/HTML rendering and content-stability regressions. |
 | `tests/test_artifact_safety.py`, `test_recovery_journal.py`, `test_process_interruptions.py` | Aliases, syscall failures, concurrent operators, stale restores, unsafe legacy fixtures and SIGKILL drills. |
+| `tests/test_rereview_regressions.py`, `test_html_preservation.py`, `test_recovery_direction.py` | Exact R1/R2 reproductions, independent HTML5 content/tail checks, recovery direction and surviving SQL evidence, local recovery SIGKILL. |
 | `tests/test_transport_faults.py` | Actual locked SDK + local fault/TLS/proxy servers, never real Google endpoints. |
 | `tests/baseline_reproductions.py` | Defect evidence run against an archived reviewed baseline only, not an acceptance test. |
 | `tests/run_offline.py`, `tests/network_guard/`, `.github/workflows/offline.yml` | Required complete lock-validated, loopback-only gate and CI. |
@@ -116,6 +118,11 @@ including UNREAD/STARRED/SENT, thread ID/membership, operation marker, approved
 plain/HTML note-bearing content, selected removal, and every remaining MIME
 resource's decoded bytes/headers. Original decoded plain correspondence is an
 exact prefix; original HTML source is exact outside the validated insertion span.
+HTMLParser's coordinates count LF only; the calculated closing-body offset must
+identify the actual closing token. A full parsed-tree comparison restores original
+text, comments, attributes, children and tails after removing only the note nodes
+and one parsed LF on each side (the note's inserted CRLF wrappers). No stripping
+or meaningful whitespace/tail normalization is permitted.
 Charset/transfer encoding becomes UTF-8/base64 with audited metadata changes;
 Content-Language is retained. Original Date versus internalDate can differ; any
 ordering delta blocks eligibility. Duplicate Message-ID/thread import behavior is
@@ -136,7 +143,8 @@ link href/title, CID-only images with alt/positive dimensions, limited lang. No
 CSS/style/class/id/hidden, scripts/raw-text, external images, implicit closing/repair,
 unknown elements, malformed comments or ambiguous document structure. HTML5 parsing
 must agree with a safe top-level insertion boundary. Source is not repaired or
-reserialized. The composed note must parse as the exact new body/fragment subtree;
+reserialized. U+2028/U+2029 and supported separators are preserved; U+0085 and
+invalid C0 codepoints retain the existing HTML5 parse-error rejection policy. The composed note must parse as the exact new body/fragment subtree;
 an independent offline PDF renderer tests visible filename/hash and exact link.
 This is bounded HTML support, not arbitrary-email rendering support.
 
@@ -189,10 +197,17 @@ SQLite commits and before remote submission. Missing/torn/conflicting evidence
 forces recovery-only behavior. Directory fsync failure after replacement reports
 uncertain durability even though a complete new file may be present.
 
-The journal must survive a **database-only** restore. Compare its account/store/head
-and full operation/backup/intent maps on every mutation. Journal-ahead state requires
-explicit local `recover-state`; it restores known IDs and pending actions without
-remote writes. `insert_pending` with no ID remains ambiguous: zero search results
+The journal must survive a **database-only** restore. Compare its account/store/head,
+full operation/backup/intent maps and surviving SQL event evidence on every mutation.
+`recover-state` validates SQL's acknowledged sequence/hash against that exact prefix
+of the candidate journal before any recovery write. Matching length or internal
+journal validity alone is insufficient. SQL latest tables must equal the prefix
+maps; every surviving event must occur in order within it. An extension must retain
+known IDs, plans, approvals and mutation bindings. Older/divergent journals, another
+store even for the same mailbox, SQL-only contradictory evidence and malformed or
+missing acknowledgment metadata block replay and preserve both sources. A compatible
+SQL-behind/journal-ahead direction permits explicit local replay without remote
+writes; durable journal publication before SQL commit remains recoverable. `insert_pending` with no ID remains ambiguous: zero search results
 are not proof of absence. Inspect exact candidates; zero/multiple/conflicting/delayed
 candidates cannot clear intent. `reconcile` may record one genuinely verified ID.
 Never regenerate a possibly existing replacement or change a saved approval.
@@ -202,7 +217,9 @@ and, only via explicit `--recover-drive-upload`, retried once at that same ID wi
 new durable recovery intent. Trash-pending retries perform read-only recovery, not
 another Trash. Legacy/old-policy records stay inspectable/reconcilable; historical
 verification may pass but always has `current_policy_eligible=False`. They never
-silently receive new Trash eligibility or a rewritten plan.
+silently receive new Trash eligibility or a rewritten plan. Policy 3 makes saved
+policy-2 plans historical, even if their prior verification passed; there is no
+automatic approval migration or silent replanning.
 
 See [docs/RECOVERY.md](docs/RECOVERY.md) for exact stop/recovery commands. The journal
 is local independent evidence, **not an external anti-rollback oracle**. Losing or
@@ -227,6 +244,6 @@ Real-mailbox work needs an additional explicit authorization after that validati
 Residuals: remote state can change after coherent checks; proxies/servers can replay
 outside this client; no global exactly-once transaction; whole-history rollback is
 undetectable locally; storage must honor fsync; narrow MIME/HTML support; no new
-live validation of policy 2; historical sent/large/custom-label evidence is offline
+live validation of policy 3; historical sent/large/custom-label evidence is offline
 only; OAuth token lifetime/policy and Trash expiry are external. Review REPORT before
 making any broader preservation or operational readiness claim.

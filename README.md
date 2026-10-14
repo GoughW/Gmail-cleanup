@@ -8,7 +8,9 @@ Nothing is sent. The replacement has a new Gmail ID. The tool has no other remov
 path, scheduler, GUI, connector, or automatic search-result cleanup.
 
 **This revision is submitted for independent re-review, not approved for live use.**
-The historical five-message disposable test predates the reviewer fixes. This task
+The historical five-message disposable test predates the reviewer fixes. New
+plans use safety/transformation policy 3; policy-2 and older saved plans remain
+immutable and inspection-only. This task
 used only fake services and loopback servers; no account access was performed.
 Start with [MAINTAINER.md](MAINTAINER.md) for the complete operator/agent mental model,
 [REPORT.md](REPORT.md) for evidence and limitations, and
@@ -96,7 +98,12 @@ journal **outside the database restore unit**, e.g. a separately retained direct
 New state requires `--initialize-state --mailbox-key EXPECTED_MAILBOX_SHA256` on
 its first preflight/plan only; existing state must never be reset to bypass a stop.
 The default `<state>.recovery` location is convenient but still must be independently
-retained, not restored with an old directory/environment snapshot.
+retained, not restored with an old directory/environment snapshot. Internal journal
+validity does not establish that it is current. Local replay requires SQL's
+acknowledged store/account/sequence/hash to be an exact journal prefix, matching
+authoritative tables and surviving event evidence. Older, divergent or incompatible
+journals block recovery without overwriting either source; never choose the journal
+simply because it parses. See [RECOVERY.md](docs/RECOVERY.md).
 
 ```sh
 # Read/download preview; add initialization flags only for genuinely NEW state.
@@ -149,7 +156,10 @@ Timestamps and other benign metadata are audited, not assumed immutable.
 
 Text notes append the original filename, canonical Drive `webViewLink` and verified
 SHA-256. HTML notes insert before the unambiguous closing body or at a validated
-fragment boundary; original source outside that span is untouched. Filenames and
+fragment boundary. Closing-body offsets use HTMLParser's LF-only coordinates and
+must identify its actual token. Original source outside the span is untouched;
+removing only the intended note and its two added newlines must also restore the
+exact parsed HTML5 content, including comments and meaningful element tails. Filenames and
 links are escaped, parsed href equals the canonical URL, and following punctuation
 stays outside the anchor. Drive backups remain private. See the exact format and
 transport-header policy in [MAINTAINER.md](MAINTAINER.md).

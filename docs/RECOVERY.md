@@ -38,20 +38,53 @@ copies; it is not tamper-proof against a privileged local operator.
 
 ## Stop conditions and local restoration
 
-Every mutation compares current journal/database head and maps. Missing, torn,
+Every mutation compares current journal/database head, maps and surviving event
+evidence. Internal journal validity does not establish freshness or compatibility. Missing, torn,
 truncated, unknown, linked, changed-genesis or conflicting history blocks execution.
 Historical status and reconciliation remain possible where records are readable.
-If only SQLite was restored and the **current complete journal survived**:
+Automatic local replay is permitted only after proving all of the following:
+
+- The SQL acknowledgment and journal have the same store UUID and mailbox identity.
+- SQL's valid nonnegative sequence and exact hash identify an existing compatible
+  prefix of the journal, including the genesis hash for sequence zero.
+- SQL operation/backup/intent tables equal that acknowledged prefix's maps.
+- Every surviving operation/backup event matches that prefix in order. After an
+  earlier compatible replay, event logs can be a subsequence because replay rebuilds
+  current tables without inventing missing audit events; no surviving row is ignored.
+- The full journal extension preserves previously known original/replacement/Drive
+  IDs, immutable plans/approvals and mutation bindings/observed results.
+
+The compatibility check holds a SQL transaction and the lifetime store lock through
+validation and replay. SQL is not replaced and recovery records are not appended
+until those checks pass. Rejection rolls back the transaction, retains both evidence
+sources unchanged and leaves the store recovery-only. There is no force override,
+conflicting-record union or automatic choice between incompatible sources.
+
+| Relationship | Local automatic recovery |
+| --- | --- |
+| SQL is an older exact acknowledged prefix, all surviving records match, current journal extends it compatibly | Allowed; preserve known IDs/intents/approvals and derive pending uncertainty where needed. |
+| Durable journal append occurred before SQL commit | Allowed with the same prefix proof; does not establish remote absence or permit blind replay. |
+| SQL and journal fully agree | Repeat recovery is safe; it does not clear ambiguous intents or authorize a new remote action. |
+| Journal is older than acknowledged SQL, equal-length divergent, or longer without compatible hash ancestry | Block; preserve and manually investigate both histories. |
+| Different store UUID (even same mailbox), different account, contradictory SQL tables/events, missing/malformed acknowledgment or unreadable evidence | Block; no overwrite/reset or new marker. |
+| Compatible hashes but extension retracts a known ID, approved plan/approval or mutation observation | Block; internal hashing alone cannot manufacture eligibility. |
+
+If SQLite was restored and the **current complete journal survived**, and all of
+that compatibility evidence is available:
 
 ```sh
 gmail-cleanup recover-state --state PRIVATE_STATE --journal CURRENT_JOURNAL \
   --mailbox-key EXPECTED_MAILBOX_KEY
 ```
 
-This explicit command writes only local SQL/recovery records. It never authenticates,
+This explicit command writes only local SQL/recovery records after proving direction.
+Do not supply an old valid journal to replace newer SQL; that would discard surviving
+mutation evidence and is rejected. It never authenticates,
 inserts, uploads or Trashes. It rebuilds maps from complete evidence, preserves IDs,
 approvals and intents, and derives uncertain lifecycle states where a pending
-intent precedes the last snapshot. It does not make old policies current or infer
+intent precedes the last snapshot. New plans require policy 3; policy-2 and older
+records remain historical. Recovery does not change policy versions or saved
+approvals. It does not make old policies current or infer
 remote absence. A conflicting configured mailbox, malformed evidence, or missing
 journal blocks restoration. A completely missing database is not automatically
 recreated; independent manual recovery review is required.
@@ -100,6 +133,9 @@ turn a read exception into confirmation of absence/success.
 - **Alias/path/private-permission error:** choose distinct private report paths.
   Do not point an output at SQL, journal, credentials, manifests or raw sources.
   Reject final symlinks/hardlinks; move copies deliberately, do not weaken checks.
+- **Journal/SQL ancestry or surviving-evidence conflict:** preserve both sources and
+  their backups for independent investigation. A valid older hash chain cannot
+  replace newer SQL evidence. Do not clear metadata/intents/events or reset a store.
 - **Another operator holds lock:** stop the second process. Do not remove the lock
   or start a different store to run concurrently. Same-account alternate stores or
   hosts are outside the local flock's protection.
