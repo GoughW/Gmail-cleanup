@@ -13,6 +13,17 @@ from .mime import json_digest
 from .storage import write_private_json
 
 
+def _unique_object(items):
+    result = dict(items)
+    if len(result) != len(items):
+        raise ValueError('Duplicate recovery JSON fields')
+    return result
+
+
+def _nonfinite(value):
+    raise ValueError('Non-JSON numeric constant')
+
+
 class Journal:
     def __init__(self, path, initialize=False, mailbox_key=None):
         self.path = Path(path).absolute()
@@ -52,7 +63,7 @@ class Journal:
                 raise CleanupError("Recovery record is aliased or not private")
             with os.fdopen(fd, "r") as stream:
                 fd = None
-                return json.load(stream)
+                return json.load(stream, object_pairs_hook=_unique_object, parse_constant=_nonfinite)
         except (ValueError, TypeError):
             raise CleanupError("Torn/malformed recovery record; mutations prohibited") from None
         finally:

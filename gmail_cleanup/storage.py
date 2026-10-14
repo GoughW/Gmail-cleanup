@@ -172,22 +172,145 @@ class Store:
         self.db.execute('INSERT OR REPLACE INTO recovery_meta VALUES (1,?)', (json.dumps(head, sort_keys=True),))
 
     def check_history(self):
-        from .mime import json_digest
         self.target.check()
         self.check_sidecars()
         if self.journal is None:
             raise CleanupError('Missing journal: legacy/restored state is recovery-only')
         records = self.journal.records()
-        expected = {'store_id': self.journal.header['store_id'], 'mailbox_key': self.journal.header['mailbox_key'],
-                    'sequence': len(records), 'hash': records[-1]['hash'] if records else json_digest(self.journal.header)}
-        row = self.db.execute('SELECT record FROM recovery_meta WHERE id=1').fetchone()
-        if not row or json.loads(row[0]) != expected:
+        acknowledged = self._compatible_recovery_prefix(records)
+        if acknowledged != len(records):
             raise CleanupError('Journal/database history differs: restore recovery required')
-        for table, wanted in self._maps(records).items():
-            observed = {key: json.loads(value) for key, value in self.db.execute(f'SELECT * FROM {table}')}
-            if observed != wanted:
-                raise CleanupError('Conflicting database/journal records: recovery required')
         return records
+
+    @staticmethod
+    def _recovery_json(encoded):
+        def pairs(items):
+            result = dict(items)
+            if len(result) != len(items):
+                raise ValueError('Duplicate JSON keys')
+            return result
+        def nonfinite(value):
+            raise ValueError('Non-JSON numeric constant')
+        try:
+            value = json.loads(encoded, object_pairs_hook=pairs, parse_constant=nonfinite)
+            if not isinstance(value, dict):
+                raise ValueError('Not a record')
+            return value
+        except (ValueError, TypeError):
+            raise CleanupError('Malformed SQL recovery evidence; manual investigation required') from None
+
+    @staticmethod
+    def _preserve_record_bindings(kind, old, new):
+        # An internally valid extension must not retract previously recorded
+        # IDs, approved bytes or mutation bindings. Check history, not just head.
+        fields = {'operations': ('message_id', 'plan', 'replacement_id', 'approval',
+                                  'insert_intent_key', 'trash_intent_key'),
+                  'backups': ('file_id', 'expected_name'),
+                  'intents': ('action', 'binding', 'result')}[kind]
+        if any(old.get(field) is not None and new.get(field) != old[field] for field in fields):
+            raise CleanupError('Journal extension retracts immutable identity/approval evidence')
+        if kind == 'intents' and old.get('state') == 'observed' and new.get('state') != 'observed':
+            raise CleanupError('Journal extension retracts observed mutation evidence')
+
+    def _validate_recovery_snapshot(self, kind, key, value):
+        from .mime import json_digest
+        if not key or not isinstance(value.get('state'), str) or not value['state']:
+            raise CleanupError('Malformed candidate recovery snapshot; preserve evidence')
+        if kind == 'operations':
+            plan = value.get('plan')
+            if (value.get('message_id') != key or not isinstance(plan, dict)
+                    or plan.get('message_id') != key or not isinstance(plan.get('original'), dict)
+                    or plan['original'].get('id') != key
+                    or not isinstance(plan.get('operation_id'), str) or not plan['operation_id']):
+                raise CleanupError('Malformed recovery operation identity/plan')
+            content = {field: item for field, item in plan.items() if field != 'plan_sha256'}
+            if plan.get('plan_sha256') != json_digest(content):
+                raise CleanupError('Recovery plan digest does not match immutable contents')
+        elif kind == 'backups':
+            if not isinstance(value.get('file_id'), str) or not value['file_id']:
+                raise CleanupError('Malformed recovery backup identity')
+        else:
+            binding = value.get('binding')
+            action = value.get('action')
+            if (not isinstance(action, str)
+                    or action not in {'gmail-insert', 'gmail-trash', 'drive-allocate', 'drive-create', 'drive-create-recovery'}
+                    or value['state'] not in {'pending', 'observed'} or not isinstance(binding, dict)
+                    or any(not isinstance(binding.get(field), str) or not binding[field]
+                           for field in ('mailbox_key', 'original_id', 'operation_id', 'plan_sha256'))
+                    or binding['mailbox_key'] != self.mailbox_key
+                    or key != json_digest({'action': action, 'binding': binding})):
+                raise CleanupError('Malformed recovery mutation identity/binding')
+            if 'result' in value and not isinstance(value['result'], dict):
+                raise CleanupError('Malformed recovery mutation result')
+            if action == 'drive-allocate' and value['state'] == 'observed':
+                result = value.get('result', {})
+                if (not isinstance(result.get('file_id'), str) or not result['file_id']
+                        or not binding.get('backup_key') or 'name' not in binding):
+                    raise CleanupError('Malformed observed Drive allocation evidence')
+
+    def _compatible_recovery_prefix(self, records):
+        """Prove direction using SQL's acknowledged hash AND all surviving evidence.
+
+        SQL may be an older compatible prefix; a stale/divergent journal may not
+        replace newer SQL. SQL event logs can be incomplete after a prior local
+        replay, but every surviving event must match the acknowledged prefix in
+        order. No evidence is unioned, ignored on conflict, or treated as absence.
+        """
+        from .mime import json_digest
+        try:
+            rows = self.db.execute('SELECT id,record FROM recovery_meta').fetchall()
+            if len(rows) != 1 or rows[0][0] != 1:
+                raise CleanupError('Missing/conflicting SQL recovery metadata; manual investigation required')
+            head = self._recovery_json(rows[0][1])
+            if (set(head) != {'store_id', 'mailbox_key', 'sequence', 'hash'}
+                    or not isinstance(head['store_id'], str) or len(head['store_id']) != 32
+                    or any(char not in '0123456789abcdef' for char in head['store_id'])
+                    or not isinstance(head['mailbox_key'], str) or not head['mailbox_key']
+                    or type(head['sequence']) is not int or head['sequence'] < 0
+                    or not isinstance(head['hash'], str) or len(head['hash']) != 64
+                    or any(char not in '0123456789abcdef' for char in head['hash'])):
+                raise CleanupError('Malformed SQL acknowledged history; manual investigation required')
+            if (head['store_id'] != self.journal.header['store_id']
+                    or head['mailbox_key'] != self.journal.header['mailbox_key']
+                    or head['mailbox_key'] != self.mailbox_key):
+                raise CleanupError('SQL/journal store or account identity conflicts; preserve both histories')
+            acknowledged = head['sequence']
+            if acknowledged > len(records):
+                raise CleanupError('Journal is older than acknowledged SQL history; preserve both histories')
+            prefix_hash = records[acknowledged-1]['hash'] if acknowledged else json_digest(self.journal.header)
+            if head['hash'] != prefix_hash:
+                raise CleanupError('Journal does not extend acknowledged SQL hash ancestry; preserve both histories')
+            prefix = records[:acknowledged]
+            expected = self._maps(prefix)
+            for table, wanted in expected.items():
+                rows = self.db.execute(f'SELECT * FROM {table}').fetchall()
+                observed = {key: self._recovery_json(encoded) for key, encoded in rows}
+                if len(observed) != len(rows) or observed != wanted:
+                    raise CleanupError('Surviving SQL records conflict with acknowledged journal prefix; preserve evidence')
+            for table, kind in (('events', 'operations'), ('backup_events', 'backups')):
+                history = [record for record in prefix if record['kind'] == kind]
+                cursor, previous_sequence = 0, 0
+                for sequence, key, timestamp, encoded in self.db.execute(f'SELECT * FROM {table} ORDER BY seq'):
+                    if (type(sequence) is not int or sequence <= previous_sequence
+                            or not isinstance(timestamp, str) or not timestamp):
+                        raise CleanupError('Malformed surviving SQL event evidence')
+                    previous_sequence = sequence
+                    value = self._recovery_json(encoded)
+                    while cursor < len(history) and (history[cursor]['key'] != key or history[cursor]['value'] != value):
+                        cursor += 1
+                    if cursor == len(history):
+                        raise CleanupError('Surviving SQL events are absent/conflicting in acknowledged history; preserve evidence')
+                    cursor += 1
+            seen = {'operations': {}, 'backups': {}, 'intents': {}}
+            for record in records:
+                kind, key, value = record['kind'], record['key'], record['value']
+                self._validate_recovery_snapshot(kind, key, value)
+                if key in seen[kind]:
+                    self._preserve_record_bindings(kind, seen[kind][key], value)
+                seen[kind][key] = value
+            return acknowledged
+        except sqlite3.Error:
+            raise CleanupError('Unreadable/incomplete SQL recovery evidence; manual investigation required') from None
 
     def require_current(self, api=None):
         if self.recovery_error:
@@ -284,13 +407,28 @@ class Store:
         self._save('intents', key, record, expected_state='pending')
 
     def restore_from_journal(self):
+        try:
+            return self._restore_compatible_journal()
+        except (CleanupError, OSError, sqlite3.Error, KeyError, ValueError, TypeError) as exc:
+            if self.db.in_transaction:
+                self.db.execute('ROLLBACK')
+            self.recovery_error = str(exc) if isinstance(exc, CleanupError) else 'Recovery evidence unreadable/incompatible; manual investigation required'
+            raise CleanupError(self.recovery_error) from None
+
+    def _restore_compatible_journal(self):
         # Explicit LOCAL recovery only. Preserve attempted actions, even if the
         # last operation snapshot predates recording its pending lifecycle state.
         if self.journal is None:
             raise CleanupError('No authoritative journal; independent recovery review required')
         if self.mailbox_key not in (None, self.journal.header['mailbox_key']):
             raise CleanupError('Configured mailbox conflicts; recovery cannot overwrite this state')
+        self.target.check()
+        self.check_sidecars()
+        # Lock the SQL snapshot through validation/replay. BEGIN acquires a lock;
+        # no authoritative SQL or journal write occurs before compatibility proof.
+        self.db.execute('BEGIN IMMEDIATE')
         records = self.journal.records()
+        self._compatible_recovery_prefix(records)
         maps = self._maps(records)
         for intent_key, intent in maps['intents'].items():
             binding = intent['binding']
@@ -316,7 +454,6 @@ class Store:
                     self.journal.append(table, key, value)
         records = self.journal.records()
         maps = self._maps(records)
-        self.db.execute('BEGIN IMMEDIATE')
         try:
             for table, values in maps.items():
                 self.db.execute(f'DELETE FROM {table}')
